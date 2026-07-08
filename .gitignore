@@ -1,0 +1,23 @@
+# OS files
+Thumbs.db
+Desktop.ini
+
+# CCS / C2000 build outputs
+**/Debug/
+**/Release/
+**/*.out
+**/*.bin
+**/*.hex
+**/*.map
+**/*.obj
+**/*.pp
+**/*.d_raw
+**/*.d
+**/*.asm
+
+# Indexes and caches
+**/.cache/
+**/.clangd/index/
+
+# Optional workspace-local logs
+.theia/*.log
