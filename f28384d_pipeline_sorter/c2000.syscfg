@@ -9,3 +9,76 @@
  * @v2CliArgs --device "TMS320F28384D" --package "176pin" --context "CPU1" --product "C2000WARE@26.01.00.00"
  * @versions {"tool":"1.28.0+4712"}
  */
+
+/**
+ * Import the modules used in this configuration.
+ */
+const device_support = scripting.addModule("/driverlib/device_support.js");
+const eqep           = scripting.addModule("/driverlib/eqep.js", {}, false);
+const eqep1          = eqep.addInstance();
+const gpio           = scripting.addModule("/driverlib/gpio.js", {}, false);
+const gpio1          = gpio.addInstance();
+const gpio2          = gpio.addInstance();
+const spi            = scripting.addModule("/driverlib/spi.js", {}, false);
+const spi1           = spi.addInstance();
+
+/**
+ * Write custom configuration values to the imported modules.
+ */
+const divider10       = system.clockTree["EPWMCLKDIV"];
+divider10.divideValue = 1;
+
+const multiplier1         = system.clockTree["AUX_IMULT"];
+multiplier1.multiplyValue = 50;
+
+const multiplier2         = system.clockTree["PLL_IMULT"];
+multiplier2.multiplyValue = 40;
+
+const mux18       = system.clockTree["XTAL_OR_X1"];
+mux18.inputSelect = "XTAL";
+
+const pinFunction3     = system.clockTree["XTAL"];
+pinFunction3.XTAL_Freq = 20;
+
+eqep1.$name                      = "myEQEP2";
+eqep1.positionCounterMax         = 2047;
+eqep1.enableModule               = true;
+eqep1.useInterrupts              = false;
+eqep1.useCase                    = "NO STROBE";
+eqep1.emulationMode              = "EQEP_EMULATIONMODE_RUNFREE";
+eqep1.aQual.qualMode             = "GPIO_QUAL_6SAMPLE";
+eqep1.bQual.qualMode             = "GPIO_QUAL_6SAMPLE";
+eqep1.indexQual.qualMode         = "GPIO_QUAL_6SAMPLE";
+eqep1.eqep.$assign               = "EQEP2";
+eqep1.eqep.eqep_aPin.$assign     = "GPIO78";
+eqep1.eqep.eqep_bPin.$assign     = "GPIO79";
+eqep1.eqep.eqep_indexPin.$assign = "GPIO81";
+
+gpio1.direction         = "GPIO_DIR_MODE_OUT";
+gpio1.writeInitialValue = true;
+gpio1.initialValue      = 1;
+gpio1.$name             = "W5500_CS";
+gpio1.gpioPin.$assign   = "GPIO19";
+
+gpio2.$name             = "W5500_RST";
+gpio2.direction         = "GPIO_DIR_MODE_OUT";
+gpio2.writeInitialValue = true;
+gpio2.gpioPin.$assign   = "GPIO94";
+
+spi1.$name                   = "mySPI0";
+spi1.transferProtocol        = "SPI_PROT_POL0PHA1";
+spi1.mode                    = "SPI_MODE_CONTROLLER";
+spi1.emulationMode           = "SPI_EMULATION_FREE_RUN";
+spi1.dataWidth               = "8";
+spi1.useFifo                 = false;
+spi1.useInterrupts           = false;
+spi1.bitRate                 = 10000000;
+spi1.spi.$assign             = "SPIA";
+spi1.spi.spi_picoPin.$assign = "GPIO16";
+spi1.spi.spi_pociPin.$assign = "GPIO17";
+spi1.spi.spi_clkPin.$assign  = "GPIO18";
+spi1.spi.spi_ptePin.$assign  = "GPIO35";
+spi1.picoQual.$name          = "myGPIOQUAL0";
+spi1.pociQual.$name          = "myGPIOQUAL1";
+spi1.clkQual.$name           = "myGPIOQUAL2";
+spi1.pteQual.$name           = "myGPIOQUAL3";

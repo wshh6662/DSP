@@ -1,0 +1,14 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "f28384d_pipeline_sorter",
+            "type": "ccs-debug",
+            "request": "launch",
+            "projectInfo": {
+                "name": "f28384d_pipeline_sorter",
+                "resourceId": "/f28384d_pipeline_sorter"
+            }
+        }
+    ]
+}

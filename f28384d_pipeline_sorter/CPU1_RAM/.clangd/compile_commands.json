@@ -2,16 +2,36 @@
    {
       "directory" : "D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter/CPU1_RAM",
       "command"   : "clang++ -I\"D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter\" -I\"C:/TI/C2000Ware_26_01_00_00\" -I\"D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter/device\" -I\"C:/TI/C2000Ware_26_01_00_00/driverlib/f2838x/driverlib/\" -I\"D:/ccs 20/ccs/tools/compiler/ti-cgt-c2000_22.6.2.LTS/include\" -DRAM -DDEBUG -DCPU1 -I\"D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter/CPU1_RAM/syscfg\" -xc",
-      "file"      : "D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter/device/device.c"
+      "file"      : "D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter/CPU1_RAM/syscfg/board.c"
    },
    {
       "directory" : "D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter/CPU1_RAM",
-      "command"   : "clang++ -I\"D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter\" -I\"C:/TI/C2000Ware_26_01_00_00\" -I\"D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter/device\" -I\"C:/TI/C2000Ware_26_01_00_00/driverlib/f2838x/driverlib/\" -I\"D:/ccs 20/ccs/tools/compiler/ti-cgt-c2000_22.6.2.LTS/include\" -DRAM -DDEBUG -DCPU1 -I\"D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter/CPU1_RAM/syscfg\"",
-      "file"      : "D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter/device/f2838x_codestartbranch.asm"
+      "command"   : "clang++ -I\"D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter\" -I\"C:/TI/C2000Ware_26_01_00_00\" -I\"D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter/device\" -I\"C:/TI/C2000Ware_26_01_00_00/driverlib/f2838x/driverlib/\" -I\"D:/ccs 20/ccs/tools/compiler/ti-cgt-c2000_22.6.2.LTS/include\" -DRAM -DDEBUG -DCPU1 -I\"D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter/CPU1_RAM/syscfg\" -xc",
+      "file"      : "D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter/CPU1_RAM/syscfg/c2000ware_libraries.c"
+   },
+   {
+      "directory" : "D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter/CPU1_RAM",
+      "command"   : "clang++ -I\"D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter\" -I\"C:/TI/C2000Ware_26_01_00_00\" -I\"D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter/device\" -I\"C:/TI/C2000Ware_26_01_00_00/driverlib/f2838x/driverlib/\" -I\"D:/ccs 20/ccs/tools/compiler/ti-cgt-c2000_22.6.2.LTS/include\" -DRAM -DDEBUG -DCPU1 -I\"D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter/CPU1_RAM/syscfg\" -xc",
+      "file"      : "D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter/CPU1_RAM/syscfg/device.c"
    },
    {
       "directory" : "D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter/CPU1_RAM",
       "command"   : "clang++ -I\"D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter\" -I\"C:/TI/C2000Ware_26_01_00_00\" -I\"D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter/device\" -I\"C:/TI/C2000Ware_26_01_00_00/driverlib/f2838x/driverlib/\" -I\"D:/ccs 20/ccs/tools/compiler/ti-cgt-c2000_22.6.2.LTS/include\" -DRAM -DDEBUG -DCPU1 -I\"D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter/CPU1_RAM/syscfg\" -xc",
       "file"      : "D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter/empty_driverlib_main.c"
+   },
+   {
+      "directory" : "D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter/CPU1_RAM",
+      "command"   : "clang++ -I\"D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter\" -I\"C:/TI/C2000Ware_26_01_00_00\" -I\"D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter/device\" -I\"C:/TI/C2000Ware_26_01_00_00/driverlib/f2838x/driverlib/\" -I\"D:/ccs 20/ccs/tools/compiler/ti-cgt-c2000_22.6.2.LTS/include\" -DRAM -DDEBUG -DCPU1 -I\"D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter/CPU1_RAM/syscfg\" -xc",
+      "file"      : "D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter/socket.c"
+   },
+   {
+      "directory" : "D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter/CPU1_RAM",
+      "command"   : "clang++ -I\"D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter\" -I\"C:/TI/C2000Ware_26_01_00_00\" -I\"D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter/device\" -I\"C:/TI/C2000Ware_26_01_00_00/driverlib/f2838x/driverlib/\" -I\"D:/ccs 20/ccs/tools/compiler/ti-cgt-c2000_22.6.2.LTS/include\" -DRAM -DDEBUG -DCPU1 -I\"D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter/CPU1_RAM/syscfg\" -xc",
+      "file"      : "D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter/w5500.c"
+   },
+   {
+      "directory" : "D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter/CPU1_RAM",
+      "command"   : "clang++ -I\"D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter\" -I\"C:/TI/C2000Ware_26_01_00_00\" -I\"D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter/device\" -I\"C:/TI/C2000Ware_26_01_00_00/driverlib/f2838x/driverlib/\" -I\"D:/ccs 20/ccs/tools/compiler/ti-cgt-c2000_22.6.2.LTS/include\" -DRAM -DDEBUG -DCPU1 -I\"D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter/CPU1_RAM/syscfg\" -xc",
+      "file"      : "D:/ccs 20/workspace_ccstheia/f28384d_pipeline_sorter/wizchip_conf.c"
    }
 ]
