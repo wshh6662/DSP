@@ -367,6 +367,39 @@ static void test_single_coil_bit_order(void)
            both_off, sizeof(both_off), NULL);
 }
 
+/* The HMI is configured for 120 coils per batch as well as 120 words, so make
+   sure the largest coil frame it can produce is still accepted and fitted. */
+static void test_coil_batch_at_hmi_maximum(void)
+{
+    static const uint8_t write_coils[] = {
+        0x12, 0x34, 0x00, 0x00, 0x00, 0x16,
+        0x01, 0x0F, 0x00, 0x00, 0x00, 0x78, 0x0F,
+        0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55,
+        0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA
+    };
+    static const uint8_t write_echo[] = {
+        0x12, 0x34, 0x00, 0x00, 0x00, 0x06,
+        0x01, 0x0F, 0x00, 0x00, 0x00, 0x78
+    };
+    static const uint8_t read_coils[] = {
+        0x12, 0x34, 0x00, 0x00, 0x00, 0x06,
+        0x01, 0x01, 0x00, 0x00, 0x00, 0x78
+    };
+    static const uint8_t read_echo[] = {
+        0x12, 0x34, 0x00, 0x00, 0x00, 0x12,
+        0x01, 0x01, 0x0F,
+        0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55,
+        0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA
+    };
+
+    expect("   FC0F write 120 coils (HMI max write)",
+           write_coils, sizeof(write_coils),
+           write_echo, sizeof(write_echo), NULL);
+    expect("   FC01 read 120 coils (HMI max read)",
+           read_coils, sizeof(read_coils),
+           read_echo, sizeof(read_echo), NULL);
+}
+
 /* --------------------------------------------------------- unsupported --- */
 
 /* G. Format-valid but unsupported functions must answer with exception 01. */
@@ -460,29 +493,43 @@ static void test_address_range_errors(void)
            illegal_address_05, sizeof(illegal_address_05), NULL);
 }
 
-/* The detection count must not be overwritable by the HMI. */
-static void test_detection_count_is_write_protected(void)
+/* Writes that touch 4x-5 / 4x-6 must be accepted, but must not change the
+   published detection count. EasyBuilder batches writes per address segment,
+   so a write to a neighbouring address carries 4x-5 along with it; rejecting
+   the whole request would break that unrelated write. */
+static void test_detection_count_ignores_writes(void)
 {
     static const uint8_t write_low[] = {
         0x12, 0x34, 0x00, 0x00, 0x00, 0x06,
-        0x01, 0x06, 0x00, 0x04, 0x00, 0x00
+        0x01, 0x06, 0x00, 0x04, 0xFF, 0xFF
     };
     static const uint8_t write_high[] = {
         0x12, 0x34, 0x00, 0x00, 0x00, 0x06,
-        0x01, 0x06, 0x00, 0x05, 0x00, 0x00
+        0x01, 0x06, 0x00, 0x05, 0xFF, 0xFF
     };
+    /* One block covering addresses 3..6, straddling the detection count the
+       same way an EasyBuilder segment write would. */
     static const uint8_t write_window[] = {
-        0x12, 0x34, 0x00, 0x00, 0x00, 0x0D,
-        0x01, 0x10, 0x00, 0x03, 0x00, 0x03, 0x06,
-        0x00, 0x01, 0x00, 0x02, 0x00, 0x03
+        0x12, 0x34, 0x00, 0x00, 0x00, 0x0F,
+        0x01, 0x10, 0x00, 0x03, 0x00, 0x04, 0x08,
+        0x00, 0x01, 0x00, 0x02, 0x00, 0x03, 0x00, 0x04
     };
-    static const uint8_t illegal_address_06[] = {
-        0x12, 0x34, 0x00, 0x00, 0x00, 0x03,
-        0x01, 0x86, 0x02
+    static const uint8_t write_window_echo[] = {
+        0x12, 0x34, 0x00, 0x00, 0x00, 0x06,
+        0x01, 0x10, 0x00, 0x03, 0x00, 0x04
     };
-    static const uint8_t illegal_address_10[] = {
-        0x12, 0x34, 0x00, 0x00, 0x00, 0x03,
-        0x01, 0x90, 0x02
+    static const uint8_t read_window[] = {
+        0x12, 0x34, 0x00, 0x00, 0x00, 0x06,
+        0x01, 0x03, 0x00, 0x03, 0x00, 0x04
+    };
+    /* Addresses 3 and 6 took the written values; 4 and 5 still report 1234. */
+    static const uint8_t read_window_expected[] = {
+        0x12, 0x34, 0x00, 0x00, 0x00, 0x0B,
+        0x01, 0x03, 0x08,
+        0x00, 0x01,
+        0x04, 0xD2,
+        0x00, 0x00,
+        0x00, 0x04
     };
     static const uint8_t read_detection[] = {
         0x12, 0x34, 0x00, 0x00, 0x00, 0x06,
@@ -493,15 +540,16 @@ static void test_detection_count_is_write_protected(void)
         0x01, 0x03, 0x04, 0x04, 0xD2, 0x00, 0x00
     };
 
-    expect("H  FC06 write to 4x-5 is rejected",
-           write_low, sizeof(write_low),
-           illegal_address_06, sizeof(illegal_address_06), NULL);
-    expect("H  FC06 write to 4x-6 is rejected",
-           write_high, sizeof(write_high),
-           illegal_address_06, sizeof(illegal_address_06), NULL);
-    expect("H  FC10 window covering 4x-5 and 4x-6 is rejected",
+    expect("H  FC06 write to 4x-5 is accepted and ignored",
+           write_low, sizeof(write_low), write_low, sizeof(write_low), NULL);
+    expect("H  FC06 write to 4x-6 is accepted and ignored",
+           write_high, sizeof(write_high), write_high, sizeof(write_high), NULL);
+    expect("H  FC10 block straddling 4x-5 / 4x-6 is accepted",
            write_window, sizeof(write_window),
-           illegal_address_10, sizeof(illegal_address_10), NULL);
+           write_window_echo, sizeof(write_window_echo), NULL);
+    expect("H  neighbours took the values, 4x-5 / 4x-6 did not",
+           read_window, sizeof(read_window),
+           read_window_expected, sizeof(read_window_expected), NULL);
     expect("   detection count still reads 1234",
            read_detection, sizeof(read_detection),
            read_detection_expected, sizeof(read_detection_expected), NULL);
@@ -703,6 +751,65 @@ static void test_maximum_write_fits_the_adu(void)
            request, sizeof(request), expected, sizeof(expected), NULL);
 }
 
+/* modbus_data lives in RAMGS0, outside the range the C runtime zeroes, so
+   ModbusTcp_ResetStorage() is what actually guarantees a clean map at power
+   up. Prove it clears both the holding registers and the coils.
+   This runs last because it wipes the whole map. */
+static void test_reset_storage_clears_the_map(void)
+{
+    static const uint8_t write_register[] = {
+        0x12, 0x34, 0x00, 0x00, 0x00, 0x06,
+        0x01, 0x06, 0x00, 0x14, 0xBE, 0xEF
+    };
+    static const uint8_t set_coil[] = {
+        0x12, 0x34, 0x00, 0x00, 0x00, 0x06,
+        0x01, 0x05, 0x00, 0x14, 0xFF, 0x00
+    };
+    static const uint8_t read_register[] = {
+        0x12, 0x34, 0x00, 0x00, 0x00, 0x06,
+        0x01, 0x03, 0x00, 0x14, 0x00, 0x01
+    };
+    static const uint8_t read_coil[] = {
+        0x12, 0x34, 0x00, 0x00, 0x00, 0x06,
+        0x01, 0x01, 0x00, 0x14, 0x00, 0x01
+    };
+    static const uint8_t register_set[] = {
+        0x12, 0x34, 0x00, 0x00, 0x00, 0x05,
+        0x01, 0x03, 0x02, 0xBE, 0xEF
+    };
+    static const uint8_t register_cleared[] = {
+        0x12, 0x34, 0x00, 0x00, 0x00, 0x05,
+        0x01, 0x03, 0x02, 0x00, 0x00
+    };
+    static const uint8_t coil_set[] = {
+        0x12, 0x34, 0x00, 0x00, 0x00, 0x04,
+        0x01, 0x01, 0x01, 0x01
+    };
+    static const uint8_t coil_cleared[] = {
+        0x12, 0x34, 0x00, 0x00, 0x00, 0x04,
+        0x01, 0x01, 0x01, 0x00
+    };
+
+    expect("   seed holding register 4x-21",
+           write_register, sizeof(write_register),
+           write_register, sizeof(write_register), NULL);
+    expect("   seed coil 0x-21",
+           set_coil, sizeof(set_coil), set_coil, sizeof(set_coil), NULL);
+    expect("   both are set before the reset",
+           read_register, sizeof(read_register),
+           register_set, sizeof(register_set), NULL);
+    expect("   coil is set before the reset",
+           read_coil, sizeof(read_coil), coil_set, sizeof(coil_set), NULL);
+
+    ModbusTcp_ResetStorage();
+
+    expect("   ModbusTcp_ResetStorage clears the holding register",
+           read_register, sizeof(read_register),
+           register_cleared, sizeof(register_cleared), NULL);
+    expect("   ModbusTcp_ResetStorage clears the coil",
+           read_coil, sizeof(read_coil), coil_cleared, sizeof(coil_cleared), NULL);
+}
+
 int main(void)
 {
     test_unwritten_register_is_zero();
@@ -716,11 +823,12 @@ int main(void)
     test_single_coil_round_trip();
     test_multiple_coils_round_trip();
     test_single_coil_bit_order();
+    test_coil_batch_at_hmi_maximum();
 
     test_unsupported_functions_answer_with_exception();
 
     test_address_range_errors();
-    test_detection_count_is_write_protected();
+    test_detection_count_ignores_writes();
     test_quantity_errors();
     test_coil_value_and_byte_count_errors();
     test_per_function_length_validation();
@@ -728,6 +836,9 @@ int main(void)
 
     test_maximum_read_fits_the_adu();
     test_maximum_write_fits_the_adu();
+
+    /* Wipes the map, so it goes last. */
+    test_reset_storage_clears_the_map();
 
     if (failures != 0) {
         fprintf(stderr, "%d Modbus TCP protocol test(s) failed.\n", failures);

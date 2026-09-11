@@ -38,11 +38,16 @@ extern "C" {
 
 // 处理一帧后回填给应用层的诊断信息，应用层再转存到 CCS Watch 可见的变量。
 typedef struct {
-    uint8_t  function;         // 请求中的功能码，未识别时也照原值记录
-    uint8_t  exception_code;   // 0 表示正常响应
+    modbus_octet_t function;       // 请求中的功能码，未识别时也照原值记录
+    modbus_octet_t exception_code; // 0 表示正常响应
     uint16_t write_address;    // 仅 FC05/06/0F/10 有效
     uint16_t write_quantity;   // 仅 FC05/06/0F/10 有效
 } modbus_tcp_result_t;
+
+// 把 HMI 可见的寄存器映射（保持寄存器 + 线圈）清零。
+// modbus_data 段被链接到 RAMGS0，不在 C 运行时自动清零的范围内，
+// 必须在 main() 里、使用寄存器映射之前调用一次，否则首次上电会读到随机值。
+void ModbusTcp_ResetStorage(void);
 
 // 处理一帧完整的 Modbus TCP 请求并生成响应。
 //

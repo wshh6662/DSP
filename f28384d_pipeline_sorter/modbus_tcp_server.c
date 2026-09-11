@@ -39,8 +39,48 @@
 
 // HMI 可见的寄存器映射。全部静态分配，不使用 malloc。
 // 掉电即丢失，这是测试阶段的预期行为。
+//
+// 这两个数组单独放进 "modbus_data" 段，由链接脚本放到 RAMGS0：
+// 合计 2048 + 256 = 0x900 words（C28x 上 char 与 uint16_t 都占 1 word），
+// 放进默认的 .bss（RAMLS5，仅 0x800 words）会直接链接失败。
+// 该段不在 C 运行时自动清零的范围内，所以必须靠 ModbusTcp_ResetStorage()
+// 显式清零，main() 在启动网络之前调用一次。
+//
+// DATA_SECTION 只有 TI 编译器认；宿主的 gcc 协议测试也编译这个文件，
+// 不套 #ifdef 会因为 -Werror=unknown-pragmas 直接编译失败。
+#define MODBUS_COIL_BYTE_COUNT  ((uint16_t)((MODBUS_COIL_COUNT + 7U) / 8U))
+
+#ifdef __TI_COMPILER_VERSION__
+#pragma DATA_SECTION(modbus_holding_registers, "modbus_data")
+#endif
 static uint16_t modbus_holding_registers[MODBUS_HOLDING_REGISTER_COUNT];
+
+#ifdef __TI_COMPILER_VERSION__
+#pragma DATA_SECTION(modbus_coils, "modbus_data")
+#endif
 static modbus_octet_t modbus_coils[(MODBUS_COIL_COUNT + 7U) / 8U];
+
+// 作用：把 HMI 可见的寄存器映射清零。
+// 用法：main() 启动时、使用寄存器映射之前调用一次。
+//       modbus_data 段被链接到 RAMGS0，不在 .bss 的自动清零范围内，不清就会
+//       在首次上电时读到随机值。
+//       这里刻意用显式循环而不是 memset：C28x 上 char 是 16 位，
+//       memset 的「字节」语义与 modbus_octet_t 数组的实际存储单位对不上，
+//       写出来的代码容易让人误判长度。
+void ModbusTcp_ResetStorage(void)
+{
+    uint16_t index;
+
+    for (index = 0U; index < (uint16_t)MODBUS_HOLDING_REGISTER_COUNT; index++)
+    {
+        modbus_holding_registers[index] = 0U;
+    }
+
+    for (index = 0U; index < MODBUS_COIL_BYTE_COUNT; index++)
+    {
+        modbus_coils[index] = 0U;
+    }
+}
 
 // ------------------------------------------------------------ 字节序工具 --
 // 显式经 uint32_t 中转：C28x 上 char/int 都是 16 位，直接左移高字节会溢出。
@@ -76,8 +116,8 @@ static void Modbus_BeginResponse(const modbus_octet_t *request,
 
 // 作用：生成 Modbus 异常响应，功能码置最高位，后跟异常码。
 static uint16_t Modbus_Exception(const modbus_octet_t *request,
-                                 uint8_t function,
-                                 uint8_t exception_code,
+                                 modbus_octet_t function,
+                                 modbus_octet_t exception_code,
                                  modbus_octet_t *response,
                                  uint16_t response_capacity,
                                  modbus_tcp_result_t *result)
@@ -136,8 +176,13 @@ static uint16_t Modbus_HoldingValue(uint16_t address, uint32_t detection_count)
     return modbus_holding_registers[address];
 }
 
-// 作用：判断地址是否落在受保护的检测数量区间，避免 HMI 覆盖检测数量。
-static uint8_t Modbus_IsReservedHoldingAddress(uint16_t address)
+// 作用：判断地址是否属于检测数量发布的地址（4x-5 / 4x-6）。
+// HMI 写这些地址时会被接受并回正常响应，但值不保存：读取路径根本不去查
+// modbus_holding_registers，4x-5 / 4x-6 永远返回动态的 g_detection_count。
+// 之所以不返回异常，是因为 EasyBuilder 按「地址整段间隔」成段读写，段内
+// 只要包含 4x-5，整段请求都会带上这两个地址；返回异常会让同一段内其它
+// 地址的合法写入一起失败。
+static modbus_octet_t Modbus_IsReservedHoldingAddress(uint16_t address)
 {
     if ((address == MODBUS_DETECTION_LOW_ADDRESS) ||
         (address == MODBUS_DETECTION_HIGH_ADDRESS))
@@ -148,14 +193,14 @@ static uint8_t Modbus_IsReservedHoldingAddress(uint16_t address)
     return 0U;
 }
 
-static uint8_t Modbus_GetCoil(uint16_t address)
+static modbus_octet_t Modbus_GetCoil(uint16_t address)
 {
     modbus_octet_t packed = modbus_coils[(uint16_t)(address >> 3U)];
 
-    return (uint8_t)((packed >> (address & 7U)) & 0x01U);
+    return (modbus_octet_t)((packed >> (address & 7U)) & 0x01U);
 }
 
-static void Modbus_SetCoil(uint16_t address, uint8_t value)
+static void Modbus_SetCoil(uint16_t address, modbus_octet_t value)
 {
     uint16_t byte_index = (uint16_t)(address >> 3U);
     modbus_octet_t mask = (modbus_octet_t)(1U << (address & 7U));
@@ -332,7 +377,8 @@ static uint16_t Modbus_WriteSingleCoil(const modbus_octet_t *request,
                                 response, response_capacity, result);
     }
 
-    Modbus_SetCoil(address, (uint8_t)((value == MODBUS_COIL_VALUE_ON) ? 1U : 0U));
+    Modbus_SetCoil(address,
+                   (modbus_octet_t)((value == MODBUS_COIL_VALUE_ON) ? 1U : 0U));
 
     if (result != 0)
     {
@@ -369,15 +415,12 @@ static uint16_t Modbus_WriteSingleRegister(const modbus_octet_t *request,
                                 MODBUS_EXCEPTION_ILLEGAL_ADDRESS,
                                 response, response_capacity, result);
     }
-    // 检测数量由 DSP 动态发布，不允许 HMI 覆盖。
-    if (Modbus_IsReservedHoldingAddress(address) != 0U)
+    // 检测数量由 DSP 动态发布：写 4x-5 / 4x-6 正常回显但不保存，读取时仍返回
+    // 动态值。返回异常会让 HMI 成段写时因为夹带这两个地址而整段失败。
+    if (Modbus_IsReservedHoldingAddress(address) == 0U)
     {
-        return Modbus_Exception(request, MODBUS_FC_WRITE_SINGLE_REGISTER,
-                                MODBUS_EXCEPTION_ILLEGAL_ADDRESS,
-                                response, response_capacity, result);
+        modbus_holding_registers[address] = value;
     }
-
-    modbus_holding_registers[address] = value;
 
     if (result != 0)
     {
@@ -441,7 +484,7 @@ static uint16_t Modbus_WriteMultipleCoils(const modbus_octet_t *request,
     {
         packed = request[MODBUS_PDU_DATA + (index >> 3U)];
         Modbus_SetCoil((uint16_t)(address + index),
-                       (uint8_t)((packed >> (index & 7U)) & 0x01U));
+                       (modbus_octet_t)((packed >> (index & 7U)) & 0x01U));
     }
 
     if (result != 0)
@@ -453,7 +496,8 @@ static uint16_t Modbus_WriteMultipleCoils(const modbus_octet_t *request,
     return Modbus_EchoWriteRequest(request, response, response_capacity);
 }
 
-// 作用：FC10 写多个保持寄存器，覆盖检测数量区间时返回 Illegal Data Address。
+// 作用：FC10 写多个保持寄存器。范围覆盖 4x-5 / 4x-6 时跳过这两个地址，
+// 其余地址照常写入并回正常响应。
 static uint16_t Modbus_WriteMultipleRegisters(const modbus_octet_t *request,
                                               uint16_t mbap_length,
                                               modbus_octet_t *response,
@@ -501,21 +545,16 @@ static uint16_t Modbus_WriteMultipleRegisters(const modbus_octet_t *request,
                                 MODBUS_EXCEPTION_ILLEGAL_ADDRESS,
                                 response, response_capacity, result);
     }
-    // 整段拒绝，不做部分写入，避免 HMI 参数被写一半。
+    // 段内包含 4x-5 / 4x-6 时跳过这两个地址、其余照常写入，不返回异常：
+    // EasyBuilder 按「地址整段间隔」成段写，段内夹带检测数量地址是常态，
+    // 整段拒绝会让同一段内合法的参数写入一起失败。
     for (index = 0U; index < quantity; index++)
     {
-        if (Modbus_IsReservedHoldingAddress((uint16_t)(address + index)) != 0U)
+        if (Modbus_IsReservedHoldingAddress((uint16_t)(address + index)) == 0U)
         {
-            return Modbus_Exception(request, MODBUS_FC_WRITE_MULTIPLE_REGISTERS,
-                                    MODBUS_EXCEPTION_ILLEGAL_ADDRESS,
-                                    response, response_capacity, result);
+            modbus_holding_registers[address + index] =
+                Modbus_ReadU16(&request[MODBUS_PDU_DATA + (index * 2U)]);
         }
-    }
-
-    for (index = 0U; index < quantity; index++)
-    {
-        modbus_holding_registers[address + index] =
-            Modbus_ReadU16(&request[MODBUS_PDU_DATA + (index * 2U)]);
     }
 
     if (result != 0)
@@ -538,7 +577,7 @@ uint16_t ModbusTcp_ProcessRequest(const modbus_octet_t *request,
 {
     uint16_t mbap_length;
     uint32_t adu_length;
-    uint8_t function;
+    modbus_octet_t function;
 
     if (result != 0)
     {

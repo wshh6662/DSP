@@ -87,6 +87,12 @@ SECTIONS
    ramgs0 : > RAMGS0, type=NOINIT
    ramgs1 : > RAMGS1, type=NOINIT
 
+   /* Modbus 通用寄存器映射：2048 个保持寄存器 + 2048 个线圈，约 0x900 words。
+      单独成段放到 RAMGS0，避免撑爆 RAMLS5 上只有 0x800 words 的 .bss。
+      该段不在 C 运行时自动清零的范围内，由 main() 中的
+      ModbusTcp_ResetStorage() 显式清零。不要加 type=NOINIT。 */
+   modbus_data : > RAMGS0
+
    MSGRAM_CPU1_TO_CPU2 > CPU1TOCPU2RAM, type=NOINIT
    MSGRAM_CPU2_TO_CPU1 > CPU2TOCPU1RAM, type=NOINIT
    MSGRAM_CPU_TO_CM   > CPUTOCMRAM, type=NOINIT

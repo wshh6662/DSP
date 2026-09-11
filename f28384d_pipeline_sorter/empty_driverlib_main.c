@@ -425,6 +425,15 @@ void main(void)
     Board_init();
     C2000Ware_libraries_init();
 
+    // modbus_data 段由链接脚本放进 RAMGS0。SysConfig/board.c 没有显式配置 GS RAM
+    // 的归属，这里明确把 GS0 划给 CPU1，避免以后给 CPU2/CM 分配共享内存时被改走。
+    // 只动 GS0，不碰 RAMGS1~15，也不影响 W5500 和编码器使用的区域。
+    MemCfg_setGSRAMMasterSel(MEMCFG_SECT_GS0, MEMCFG_GSRAMMASTER_CPU1);
+
+    // modbus_data 不在 .bss 的自动清零范围内，启动时显式清一次，
+    // 保证首次上电读到的是 0 而不是随机值。
+    ModbusTcp_ResetStorage();
+
     // 先确认W5500能通过SPI读到版本号，再启动502端口；失败也不会卡死。
     network_ready = W5500_NetworkInit();
     g_network_ready_state = network_ready;

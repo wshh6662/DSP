@@ -16,6 +16,8 @@
 const device_support = scripting.addModule("/driverlib/device_support.js");
 const eqep           = scripting.addModule("/driverlib/eqep.js", {}, false);
 const eqep1          = eqep.addInstance();
+const eqep2          = eqep.addInstance();
+const eqep3          = eqep.addInstance();
 const gpio           = scripting.addModule("/driverlib/gpio.js", {}, false);
 const gpio1          = gpio.addInstance();
 const gpio2          = gpio.addInstance();
@@ -53,6 +55,36 @@ eqep1.eqep.$assign               = "EQEP2";
 eqep1.eqep.eqep_aPin.$assign     = "GPIO78";
 eqep1.eqep.eqep_bPin.$assign     = "GPIO79";
 eqep1.eqep.eqep_indexPin.$assign = "GPIO81";
+
+// Encoder 1: PCB mapping uses eQEP1 on GPIO20/GPIO21/GPIO99.
+eqep2.$name                      = "myEQEP1";
+eqep2.positionCounterMax         = 2047;
+eqep2.enableModule               = true;
+eqep2.useInterrupts              = false;
+eqep2.useCase                    = "NO STROBE";
+eqep2.emulationMode              = "EQEP_EMULATIONMODE_RUNFREE";
+eqep2.aQual.qualMode             = "GPIO_QUAL_6SAMPLE";
+eqep2.bQual.qualMode             = "GPIO_QUAL_6SAMPLE";
+eqep2.indexQual.qualMode         = "GPIO_QUAL_6SAMPLE";
+eqep2.eqep.$assign               = "EQEP1";
+eqep2.eqep.eqep_aPin.$assign     = "GPIO20";
+eqep2.eqep.eqep_bPin.$assign     = "GPIO21";
+eqep2.eqep.eqep_indexPin.$assign = "GPIO99";
+
+// Encoder 3: PCB mapping uses eQEP3 on GPIO28/GPIO29/GPIO31.
+eqep3.$name                      = "myEQEP3";
+eqep3.positionCounterMax         = 2047;
+eqep3.enableModule               = true;
+eqep3.useInterrupts              = false;
+eqep3.useCase                    = "NO STROBE";
+eqep3.emulationMode              = "EQEP_EMULATIONMODE_RUNFREE";
+eqep3.aQual.qualMode             = "GPIO_QUAL_6SAMPLE";
+eqep3.bQual.qualMode             = "GPIO_QUAL_6SAMPLE";
+eqep3.indexQual.qualMode         = "GPIO_QUAL_6SAMPLE";
+eqep3.eqep.$assign               = "EQEP3";
+eqep3.eqep.eqep_aPin.$assign     = "GPIO28";
+eqep3.eqep.eqep_bPin.$assign     = "GPIO29";
+eqep3.eqep.eqep_indexPin.$assign = "GPIO31";
 
 gpio1.direction         = "GPIO_DIR_MODE_OUT";
 gpio1.writeInitialValue = true;
