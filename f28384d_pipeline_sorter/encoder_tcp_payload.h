@@ -30,6 +30,11 @@ uint16_t EncoderTcp_BuildDiagnosticPayload(uint32_t position,
                                            encoder_octet_t *payload,
                                            uint16_t payload_capacity);
 
+// 作用：判断 10 ms 主循环是否到了发送周期。
+// 用法：elapsed_ticks 达到 period_ticks 时返回 1；周期为 0 时始终不发送。
+uint16_t EncoderTcp_IsSendDue(uint16_t elapsed_ticks,
+                              uint16_t period_ticks);
+
 #ifdef __cplusplus
 }
 #endif

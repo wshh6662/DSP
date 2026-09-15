@@ -91,3 +91,14 @@ uint16_t EncoderTcp_BuildDiagnosticPayload(uint32_t position,
 
     return payload_length;
 }
+
+uint16_t EncoderTcp_IsSendDue(uint16_t elapsed_ticks,
+                              uint16_t period_ticks)
+{
+    if ((period_ticks != 0U) && (elapsed_ticks >= period_ticks))
+    {
+        return 1U;
+    }
+
+    return 0U;
+}

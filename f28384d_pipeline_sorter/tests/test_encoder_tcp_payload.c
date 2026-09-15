@@ -55,6 +55,15 @@ int main(void)
                             "encoder=0,A=0,B=0,Z=0\r\n", 23U);
     AssertDiagnosticPayload(1234U, 1U, 0U, 1U,
                             "encoder=1234,A=1,B=0,Z=1\r\n", 26U);
+    AssertDiagnosticPayload(4294967295UL, 1U, 1U, 1U,
+                            "encoder=4294967295,A=1,B=1,Z=1\r\n", 32U);
+
+    // The TCP stream is called every 10 ms and must publish one sample
+    // exactly every five calls, i.e. every 50 ms.
+    assert(EncoderTcp_IsSendDue(4U, 5U) == 0U);
+    assert(EncoderTcp_IsSendDue(5U, 5U) == 1U);
+    assert(EncoderTcp_IsSendDue(6U, 5U) == 1U);
+    assert(EncoderTcp_IsSendDue(0U, 0U) == 0U);
 
     puts("Encoder TCP payload tests passed.");
     return 0;

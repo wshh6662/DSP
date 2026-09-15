@@ -71,9 +71,13 @@ eqep2.eqep.eqep_aPin.$assign     = "GPIO20";
 eqep2.eqep.eqep_bPin.$assign     = "GPIO21";
 eqep2.eqep.eqep_indexPin.$assign = "GPIO99";
 
-// Encoder 3: PCB mapping uses eQEP3 on GPIO28/GPIO29/GPIO31.
+// Encoder 3: the installed encoder is 1024 P/R. Count both edges of A and B,
+// giving 4096 quadrature counts per revolution; wrap QPOSCNT at 4095.
+// Z remains available for index diagnostics but does not reset position.
+// PCB mapping uses eQEP3 on GPIO28/GPIO29/GPIO31.
 eqep3.$name                      = "myEQEP3";
-eqep3.positionCounterMax         = 2047;
+eqep3.positionCounterMode        = "EQEP_POSITION_RESET_MAX_POS";
+eqep3.positionCounterMax         = 4095;
 eqep3.enableModule               = true;
 eqep3.useInterrupts              = false;
 eqep3.useCase                    = "NO STROBE";
