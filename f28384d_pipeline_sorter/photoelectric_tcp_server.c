@@ -26,7 +26,7 @@
 volatile uint8_t g_photoelectric_socket_status = SOCK_CLOSED; // Socket 0 当前状态，23表示已连接。
 volatile int32_t g_photoelectric_last_send_result = 0;        // 最近一次 send() 的返回值。
 volatile uint32_t g_photoelectric_tcp_poll_count = 0U;        // TCP 服务轮询累计次数。
-volatile uint32_t g_photoelectric_tcp_send_count = 0U;        // 完整发送 0/1 状态帧的累计次数。
+volatile uint32_t g_photoelectric_tcp_send_count = 0U;        // 完整发送 speed/photo 状态帧的累计次数。
 volatile int32_t g_photoelectric_network_init_result = 0;     // W5500 初始化结果：0=成功，非0=失败。
 volatile uint16_t g_photoelectric_w5500_version = 0U;         // W5500 版本寄存器，正常值为4。
 
@@ -121,9 +121,9 @@ int photoelectric_tcp_server_init(void)
     return g_photoelectric_network_init_result;
 }
 
-void photoelectric_tcp_server_poll(uint16_t detected)
+void photoelectric_tcp_server_poll(uint16_t detected, int32_t speed_rpm_x100)
 {
-    static photoelectric_octet_t payload[PHOTOELECTRIC_TCP_PAYLOAD_LENGTH];
+    static photoelectric_octet_t payload[PHOTOELECTRIC_TCP_PAYLOAD_CAPACITY];
     static uint16_t payload_length = 0U;
     static uint16_t payload_sent = 0U;
     static uint16_t elapsed_ticks = 0U;
@@ -177,7 +177,10 @@ void photoelectric_tcp_server_poll(uint16_t detected)
 
             elapsed_ticks = 0U;
             payload_length = photoelectric_tcp_build_payload(
-                detected, payload, PHOTOELECTRIC_TCP_PAYLOAD_LENGTH);
+                detected,
+                speed_rpm_x100,
+                payload,
+                PHOTOELECTRIC_TCP_PAYLOAD_CAPACITY);
             payload_sent = 0U;
         }
 

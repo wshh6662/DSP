@@ -22,8 +22,10 @@ extern volatile uint16_t g_photoelectric_w5500_version;
 // 初始化 W5500，配置 DSP 地址为 192.168.1.20。
 int photoelectric_tcp_server_init(void);
 
-// 维护非阻塞 TCP Server，每 5 次 10 ms 轮询发送一次检测状态。
-void photoelectric_tcp_server_poll(uint16_t detected);
+// 维护非阻塞 TCP Server，每 5 次 10 ms 轮询发送一行
+// "speed=xx.xx,photo=n\r\n"；转速与光电状态合并到同一行，避免两个模块抢占 socket 0。
+// speed_rpm_x100 由调用方在主循环里先取好快照，本模块不直接读取正在变化的 ISR 变量。
+void photoelectric_tcp_server_poll(uint16_t detected, int32_t speed_rpm_x100);
 
 #ifdef __cplusplus
 }

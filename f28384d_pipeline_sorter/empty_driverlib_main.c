@@ -1,6 +1,11 @@
 //#############################################################################
 // FILE:   empty_driverlib_main.c
-// TITLE:  F28384D 编码器 3 与光电检测 TCP 测试
+// TITLE:  F28384D 转盘转速（编码器 3，M 法）+ 光电检测 TCP 测试
+//#############################################################################
+//
+// 转盘转速由 turntable_speed.c 里的 CPU Timer0 10 ms 中断独立测量，
+// 主循环只负责取速度快照、刷新 CCS Watch 变量和维护非阻塞 TCP Server。
+// 因此 W5500 收发造成的轮询抖动不会影响 10 ms 采样周期。
 //#############################################################################
 
 #include "driverlib.h"
@@ -10,6 +15,7 @@
 #include "encoder_watch.h"
 #include "photoelectric_sensor.h"
 #include "photoelectric_tcp_server.h"
+#include "turntable_speed.h"
 
 #define NETWORK_RETRY_TICKS    100U
 
@@ -17,6 +23,7 @@ void main(void)
 {
     int network_ready;
     uint16_t network_retry_ticks = 0U;
+    int32_t speed_snapshot;
 
     // 初始化 CPU、GPIO 和中断模块。
     Device_init();
@@ -30,6 +37,12 @@ void main(void)
     // IN0 对应 GPIO26。NPN 常开传感器检测到物体时输入为低电平。
     photoelectric_sensor_init();
 
+    // 启动 10 ms 的 CPU Timer0，用编码器 3 做 M 法测速。
+    turntable_speed_init();
+
+    EINT;
+    ERTM;
+
     // W5500 使用 192.168.1.20:2000；初始化失败时主循环每约 1 秒重试。
     network_ready = photoelectric_tcp_server_init();
 
@@ -39,10 +52,14 @@ void main(void)
         encoder_watch_update_encoder3();
         photoelectric_sensor_update();
 
+        // 每轮只取一次转速快照，传给 TCP 模块，避免它重复读取正在被 ISR 更新的变量。
+        speed_snapshot = turntable_speed_get_rpm_x100();
+
         if (network_ready == 0)
         {
-            // 每 50 ms 向已连接客户端发送“1\r\n”或“0\r\n”。
-            photoelectric_tcp_server_poll(g_photoelectric_detected);
+            // 每 50 ms 向已连接客户端发送一行 "speed=xx.xx,photo=n\r\n"。
+            photoelectric_tcp_server_poll(g_photoelectric_detected,
+                                          speed_snapshot);
         }
         else
         {
@@ -54,7 +71,7 @@ void main(void)
             }
         }
 
-        // 10 ms 周期兼顾 CCS Watch 刷新和 TCP 非阻塞轮询。
+        // 10 ms 周期只用来降低轮询压力，测速精度由 Timer0 中断保证。
         DEVICE_DELAY_US(10000U);
     }
 }

@@ -5,6 +5,7 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 static uint32_t stub_input_level = 1U;
 static uint32_t configured_direction_pin = 0U;
@@ -38,14 +39,20 @@ void GPIO_setQualificationMode(uint32_t pin, uint32_t qualification)
     configured_qualification = qualification;
 }
 
-static void assert_payload(uint16_t detected, const char *expected)
+// 校验整行报文与期望完全一致，并把实际长度也检查一遍。
+static void assert_payload(uint16_t detected,
+                           int32_t speed_rpm_x100,
+                           const char *expected)
 {
-    photoelectric_octet_t payload[PHOTOELECTRIC_TCP_PAYLOAD_LENGTH];
+    photoelectric_octet_t payload[PHOTOELECTRIC_TCP_PAYLOAD_CAPACITY];
     uint16_t index;
     uint16_t length = photoelectric_tcp_build_payload(
-        detected, payload, PHOTOELECTRIC_TCP_PAYLOAD_LENGTH);
+        detected,
+        speed_rpm_x100,
+        payload,
+        PHOTOELECTRIC_TCP_PAYLOAD_CAPACITY);
 
-    assert(length == PHOTOELECTRIC_TCP_PAYLOAD_LENGTH);
+    assert(length == (uint16_t)strlen(expected));
     for (index = 0U; index < length; index++)
     {
         assert(payload[index] == (photoelectric_octet_t)expected[index]);
@@ -103,11 +110,24 @@ int main(void)
     assert(g_photoelectric_rising_edge == 0U);
     assert(g_photoelectric_leave_count == 1U);
 
-    // TCP 客户端按行接收连续的 0/1 状态。
-    assert_payload(0U, "0\r\n");
-    assert_payload(1U, "1\r\n");
-    assert_payload(7U, "1\r\n");
-    assert(photoelectric_tcp_build_payload(1U, too_small, 2U) == 0U);
+    // TCP 客户端按行接收 "speed=xx.xx,photo=n"。
+    assert_payload(0U, 0, "speed=0.00,photo=0\r\n");
+    assert_payload(1U, 2929, "speed=29.29,photo=1\r\n");
+    assert_payload(0U, -1250, "speed=-12.50,photo=0\r\n");
+
+    // 补齐定点格式的边界：小数补零、负零附近、位数增加与最坏长度。
+    assert_payload(1U, 100, "speed=1.00,photo=1\r\n");
+    assert_payload(0U, 5, "speed=0.05,photo=0\r\n");
+    assert_payload(1U, -1, "speed=-0.01,photo=1\r\n");
+    assert_payload(1U, 123456, "speed=1234.56,photo=1\r\n");
+    assert_payload(1U, -2929, "speed=-29.29,photo=1\r\n");
+    assert_payload(0U,
+                   (-2147483647 - 1),
+                   "speed=-21474836.48,photo=0\r\n");
+
+    // 容量不足或空指针时必须整体拒绝。
+    assert(photoelectric_tcp_build_payload(1U, 2929, too_small, 2U) == 0U);
+    assert(photoelectric_tcp_build_payload(1U, 0, 0, 48U) == 0U);
 
     // 主循环周期为 10 ms，五次轮询形成 50 ms 发送周期。
     assert(photoelectric_tcp_is_send_due(4U, 5U) == 0U);
