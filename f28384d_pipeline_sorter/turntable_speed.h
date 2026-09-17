@@ -42,7 +42,10 @@ void turntable_speed_init(void);
 // 内部在极短临界区内复制 ISR 正在更新的数值，避免 32 位数据被读成半新半旧。
 int32_t turntable_speed_get_rpm_x100(void);
 
-// Timer0 中断服务函数：只读编码器 3 并做 M 法累加，不做 TCP 发送或字符串格式化。
+// 把 eQEP3 位置、测速基准和软件角度同步清零，供 TCP "re" 命令调用。
+void turntable_speed_reset_encoder3(void);
+
+// Timer0 中断服务函数：读取编码器 3，更新 M 法转速、当前角度和光电状态。
 TURNTABLE_SPEED_ISR void turntable_speed_timer_isr(void);
 
 // 把本次位置与上次位置之差换算成带方向的计数增量，并处理 0～4095 的回绕。

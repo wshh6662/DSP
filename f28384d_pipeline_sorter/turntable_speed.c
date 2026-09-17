@@ -17,11 +17,16 @@
 //
 // 测速窗口长度只由 Timer0 决定，和主循环里的 TCP 轮询、DEVICE_DELAY_US 无关，
 // 所以 W5500 收发造成的周期抖动不会污染测速结果。
+//
+// 同一个 10 ms 中断还负责刷新光电上升沿/下降沿，并把编码器计数差交给
+// turntable_angle.c 计算复位零点后的单圈实时角度。
 //#############################################################################
 
 #include "driverlib.h"
 #include "device.h"
 #include "board.h"
+#include "photoelectric_sensor.h"
+#include "turntable_angle.h"
 #include "turntable_speed.h"
 
 // ---- CCS Watch 变量 ----
@@ -83,6 +88,9 @@ static void turntable_speed_sample_position(uint32_t current_position)
     g_turntable_previous_position = current_position;
     g_turntable_sample_delta = delta;
 
+    // 把带方向的计数差交给单圈角度模块。
+    turntable_angle_update_delta(delta);
+
     g_turntable_accumulated_count += delta;
     turntable_window_sample_count++;
 
@@ -101,13 +109,16 @@ static void turntable_speed_sample_position(uint32_t current_position)
     }
 }
 
-// Timer0 中断服务函数：只读取编码器并做 M 法累加。
-// 这里不做 TCP 发送、不做 ASCII 转换、不做复杂格式化，保证 10 ms 周期稳定。
+// Timer0 中断服务函数：先采编码器做 M 法和当前角度，再刷新光电边沿。
+// 中断内不做 TCP 发送或 ASCII 格式化，保证 10 ms 周期稳定。
 TURNTABLE_SPEED_ISR void turntable_speed_timer_isr(void)
 {
     g_turntable_timer_interrupt_count++;
 
     turntable_speed_sample_position(EQEP_getPosition(myEQEP3_BASE));
+
+    // 用固定 10 ms 周期持续刷新光电当前状态及上升沿/下降沿。
+    photoelectric_sensor_update();
 
     // Timer0 属于 PIE 第 1 组（INT1.7）。
     CPUTimer_clearOverflowFlag(CPUTIMER0_BASE);
@@ -159,4 +170,28 @@ int32_t turntable_speed_get_rpm_x100(void)
     }
 
     return snapshot;
+}
+
+void turntable_speed_reset_encoder3(void)
+{
+    bool interrupts_were_disabled;
+
+    interrupts_were_disabled = Interrupt_disableGlobal();
+
+    // 硬件位置与所有依赖上一采样点的软件状态必须在同一临界区清零。
+    EQEP_setPosition(myEQEP3_BASE, 0U);
+    g_turntable_encoder_position = 0U;
+    g_turntable_previous_position = 0U;
+    g_turntable_sample_delta = 0;
+    g_turntable_accumulated_count = 0;
+    g_turntable_speed_count_m = 0;
+    g_turntable_speed_rpm_x100 = 0;
+    g_turntable_speed_rpm = 0.0f;
+    turntable_window_sample_count = 0U;
+    turntable_angle_init();
+
+    if (interrupts_were_disabled == false)
+    {
+        (void)Interrupt_enableGlobal();
+    }
 }

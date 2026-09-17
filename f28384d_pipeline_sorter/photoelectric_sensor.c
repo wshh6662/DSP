@@ -6,14 +6,14 @@
 #include "driverlib.h"
 #include "photoelectric_sensor.h"
 
-volatile uint16_t g_photoelectric_raw_level = 1U;
-volatile uint16_t g_photoelectric_detected = 0U;
-volatile uint16_t g_photoelectric_falling_edge = 0U;
-volatile uint16_t g_photoelectric_rising_edge = 0U;
-volatile uint32_t g_photoelectric_enter_count = 0U;
-volatile uint32_t g_photoelectric_leave_count = 0U;
+volatile uint16_t g_photoelectric_raw_level = 1U;      // GPIO26 当前原始电平
+volatile uint16_t g_photoelectric_detected = 0U;       // 物品状态：下降沿置 1，上升沿置 0
+volatile uint16_t g_photoelectric_falling_edge = 0U;   // 最近一次边沿为下降沿时保持 1
+volatile uint16_t g_photoelectric_rising_edge = 0U;    // 最近一次边沿为上升沿时保持 1
+volatile uint32_t g_photoelectric_enter_count = 0U;    // 下降沿累计次数
+volatile uint32_t g_photoelectric_leave_count = 0U;    // 上升沿累计次数
 
-static uint16_t photoelectric_previous_raw_level = 1U;
+static uint16_t photoelectric_previous_raw_level = 1U; // 上一次采样的 GPIO26 电平
 
 void photoelectric_sensor_init(void)
 {
@@ -38,15 +38,12 @@ void photoelectric_sensor_update(void)
     g_photoelectric_raw_level =
         (uint16_t)GPIO_readPin(PHOTOELECTRIC_SENSOR_GPIO);
 
-    // 边沿标志只保持一个主循环周期，便于在 CCS Watch 中诊断。
-    g_photoelectric_falling_edge = 0U;
-    g_photoelectric_rising_edge = 0U;
-
     if ((photoelectric_previous_raw_level != 0U) &&
         (g_photoelectric_raw_level == 0U))
     {
         // NPN 常开输出导通：物品进入，GPIO26 出现下降沿。
         g_photoelectric_falling_edge = 1U;
+        g_photoelectric_rising_edge = 0U;
         g_photoelectric_detected = 1U;
         g_photoelectric_enter_count++;
     }
@@ -54,6 +51,7 @@ void photoelectric_sensor_update(void)
              (g_photoelectric_raw_level != 0U))
     {
         // NPN 常开输出断开：物品离开，GPIO26 出现上升沿。
+        g_photoelectric_falling_edge = 0U;
         g_photoelectric_rising_edge = 1U;
         g_photoelectric_detected = 0U;
         g_photoelectric_leave_count++;

@@ -1,11 +1,10 @@
 //#############################################################################
 // FILE:   empty_driverlib_main.c
-// TITLE:  F28384D 转盘转速（编码器 3，M 法）+ 光电检测 TCP 测试
+// TITLE:  F28384D 编码器转速 + 当前角度 + 光电检测 TCP 测试
 //#############################################################################
 //
-// 转盘转速由 turntable_speed.c 里的 CPU Timer0 10 ms 中断独立测量，
-// 主循环只负责取速度快照、刷新 CCS Watch 变量和维护非阻塞 TCP Server。
-// 因此 W5500 收发造成的轮询抖动不会影响 10 ms 采样周期。
+// CPU Timer0 每 10 ms 完成编码器测速、当前角度和光电边沿采样。
+// 主循环只负责取快照、刷新 CCS Watch 变量和维护非阻塞 TCP Server。
 //#############################################################################
 
 #include "driverlib.h"
@@ -15,6 +14,7 @@
 #include "encoder_watch.h"
 #include "photoelectric_sensor.h"
 #include "photoelectric_tcp_server.h"
+#include "turntable_angle.h"
 #include "turntable_speed.h"
 
 #define NETWORK_RETRY_TICKS    100U
@@ -23,7 +23,9 @@ void main(void)
 {
     int network_ready;
     uint16_t network_retry_ticks = 0U;
-    int32_t speed_snapshot;
+    int32_t encoder_speed_snapshot;
+    int32_t angle_snapshot_x100;
+    uint16_t reset_requested;
 
     // 初始化 CPU、GPIO 和中断模块。
     Device_init();
@@ -37,7 +39,10 @@ void main(void)
     // IN0 对应 GPIO26。NPN 常开传感器检测到物体时输入为低电平。
     photoelectric_sensor_init();
 
-    // 启动 10 ms 的 CPU Timer0，用编码器 3 做 M 法测速。
+    // 建立当前角度的零点。
+    turntable_angle_init();
+
+    // 启动 10 ms Timer0：编码器测速、当前角度和光电边沿检测共用此时基。
     turntable_speed_init();
 
     EINT;
@@ -48,18 +53,26 @@ void main(void)
 
     while (1)
     {
-        // 刷新编码器 3 和光电输入的 CCS Watch 变量。
+        // 刷新编码器 3 的 CCS Watch 变量。
         encoder_watch_update_encoder3();
-        photoelectric_sensor_update();
 
-        // 每轮只取一次转速快照，传给 TCP 模块，避免它重复读取正在被 ISR 更新的变量。
-        speed_snapshot = turntable_speed_get_rpm_x100();
+        // 每轮取一次转速和当前单圈角度快照。
+        encoder_speed_snapshot = turntable_speed_get_rpm_x100();
+        angle_snapshot_x100 = turntable_angle_get_degrees_x100();
 
         if (network_ready == 0)
         {
-            // 每 50 ms 向已连接客户端发送一行 "speed=xx.xx,photo=n\r\n"。
-            photoelectric_tcp_server_poll(g_photoelectric_detected,
-                                          speed_snapshot);
+            // 每约 1 秒发送当前角度；收到 ASCII "re" 时返回复位请求。
+            reset_requested = (uint16_t)photoelectric_tcp_server_poll(
+                g_photoelectric_detected,
+                encoder_speed_snapshot,
+                angle_snapshot_x100);
+
+            if (reset_requested != 0U)
+            {
+                // 同步清零 eQEP3、测速基准和当前角度，防止复位后速度跳变。
+                turntable_speed_reset_encoder3();
+            }
         }
         else
         {

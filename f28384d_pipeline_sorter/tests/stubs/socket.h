@@ -20,5 +20,6 @@ int8_t listen(uint8_t socket_number);
 int8_t disconnect(uint8_t socket_number);
 int8_t close(uint8_t socket_number);
 int32_t send(uint8_t socket_number, uint8_t *buffer, uint16_t length);
+int32_t recv(uint8_t socket_number, uint8_t *buffer, uint16_t length);
 
 #endif

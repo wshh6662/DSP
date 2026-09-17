@@ -41,16 +41,17 @@ void GPIO_setQualificationMode(uint32_t pin, uint32_t qualification)
 
 // 校验整行报文与期望完全一致，并把实际长度也检查一遍。
 static void assert_payload(uint16_t detected,
-                           int32_t speed_rpm_x100,
+                           int32_t encoder_rpm_x100,
+                           int32_t angle_degrees_x100,
                            const char *expected)
 {
     photoelectric_octet_t payload[PHOTOELECTRIC_TCP_PAYLOAD_CAPACITY];
     uint16_t index;
-    uint16_t length = photoelectric_tcp_build_payload(
-        detected,
-        speed_rpm_x100,
-        payload,
-        PHOTOELECTRIC_TCP_PAYLOAD_CAPACITY);
+    uint16_t length = photoelectric_tcp_build_payload(detected,
+                                                      encoder_rpm_x100,
+                                                      angle_degrees_x100,
+                                                      payload,
+                                                      PHOTOELECTRIC_TCP_PAYLOAD_CAPACITY);
 
     assert(length == (uint16_t)strlen(expected));
     for (index = 0U; index < length; index++)
@@ -61,7 +62,8 @@ static void assert_payload(uint16_t detected,
 
 int main(void)
 {
-    photoelectric_octet_t too_small[2];
+    const char *typical = "enc_rpm=29.29,obj=1,angle=359.91\r\n";
+    photoelectric_octet_t probe[PHOTOELECTRIC_TCP_PAYLOAD_CAPACITY];
 
     stub_input_level = 1U;
     photoelectric_sensor_init();
@@ -89,10 +91,10 @@ int main(void)
     assert(g_photoelectric_rising_edge == 0U);
     assert(g_photoelectric_enter_count == 1U);
 
-    // 持续遮挡不能重复产生进入沿，状态保持 1。
+    // 持续遮挡不能重复产生进入沿；下降沿显示保持 1，便于 CCS Watch 观察。
     photoelectric_sensor_update();
     assert(g_photoelectric_detected == 1U);
-    assert(g_photoelectric_falling_edge == 0U);
+    assert(g_photoelectric_falling_edge == 1U);
     assert(g_photoelectric_rising_edge == 0U);
     assert(g_photoelectric_enter_count == 1U);
 
@@ -104,35 +106,62 @@ int main(void)
     assert(g_photoelectric_rising_edge == 1U);
     assert(g_photoelectric_leave_count == 1U);
 
-    // 持续无遮挡不能重复产生离开沿。
+    // 持续无遮挡不能重复产生离开沿；上升沿显示保持 1，直到下一次下降沿。
     photoelectric_sensor_update();
     assert(g_photoelectric_detected == 0U);
-    assert(g_photoelectric_rising_edge == 0U);
+    assert(g_photoelectric_falling_edge == 0U);
+    assert(g_photoelectric_rising_edge == 1U);
     assert(g_photoelectric_leave_count == 1U);
 
-    // TCP 客户端按行接收 "speed=xx.xx,photo=n"。
-    assert_payload(0U, 0, "speed=0.00,photo=0\r\n");
-    assert_payload(1U, 2929, "speed=29.29,photo=1\r\n");
-    assert_payload(0U, -1250, "speed=-12.50,photo=0\r\n");
+    // ---- 测试 6：TCP 报文格式 ----
+    // 编码器 29.29 rpm、检测到物品，当前位置为 359.91 度。
+    assert_payload(1U, 2929, 35991, typical);
+    assert(strlen(typical) == 34U);
 
-    // 补齐定点格式的边界：小数补零、负零附近、位数增加与最坏长度。
-    assert_payload(1U, 100, "speed=1.00,photo=1\r\n");
-    assert_payload(0U, 5, "speed=0.05,photo=0\r\n");
-    assert_payload(1U, -1, "speed=-0.01,photo=1\r\n");
-    assert_payload(1U, 123456, "speed=1234.56,photo=1\r\n");
-    assert_payload(1U, -2929, "speed=-29.29,photo=1\r\n");
-    assert_payload(0U,
-                   (-2147483647 - 1),
-                   "speed=-21474836.48,photo=0\r\n");
+    // 编码器零位角度为 0.00 度。
+    assert_payload(0U, 0, 0,
+                   "enc_rpm=0.00,obj=0,angle=0.00\r\n");
 
-    // 容量不足或空指针时必须整体拒绝。
-    assert(photoelectric_tcp_build_payload(1U, 2929, too_small, 2U) == 0U);
-    assert(photoelectric_tcp_build_payload(1U, 0, 0, 48U) == 0U);
+    // 反转时当前位置仍使用 0～359.91 度的单圈角度。
+    assert_payload(1U, -100, 35991,
+                   "enc_rpm=-1.00,obj=1,angle=359.91\r\n");
 
-    // 主循环周期为 10 ms，五次轮询形成 50 ms 发送周期。
-    assert(photoelectric_tcp_is_send_due(4U, 5U) == 0U);
-    assert(photoelectric_tcp_is_send_due(5U, 5U) == 1U);
-    assert(photoelectric_tcp_is_send_due(6U, 5U) == 1U);
+    // 三位整数和很小的正转速仍按两位小数输出。
+    assert_payload(0U, 123456, 9000,
+                   "enc_rpm=1234.56,obj=0,angle=90.00\r\n");
+    assert_payload(1U, 5, 0,
+                   "enc_rpm=0.05,obj=1,angle=0.00\r\n");
+
+    // 极值：编码器取 INT32_MIN。
+    assert_payload(1U, (-2147483647 - 1), 35991,
+                   "enc_rpm=-21474836.48,obj=1,angle=359.91\r\n");
+
+    assert(PHOTOELECTRIC_TCP_PAYLOAD_CAPACITY >= 38U);
+
+    // 容量不足时必须整体拒绝，不能发出半截报文。
+    assert(photoelectric_tcp_build_payload(1U, 2929, 35991, probe, 33U) == 0U);
+    assert(photoelectric_tcp_build_payload(1U, 2929, 35991, probe, 34U) == 34U);
+
+    // 容量之外一个字节都不能写。
+    {
+        uint8_t guarded[80];
+        uint16_t index;
+
+        memset(guarded, 0xAA, sizeof(guarded));
+        assert(photoelectric_tcp_build_payload(1U, 2929, 90, guarded, 10U) == 0U);
+        for (index = 10U; index < (uint16_t)sizeof(guarded); index++)
+        {
+            assert(guarded[index] == 0xAAU);
+        }
+    }
+
+    // 空指针必须被拒绝。
+    assert(photoelectric_tcp_build_payload(1U, 0, 0, 0, 64U) == 0U);
+
+    // 主循环周期为 10 ms，100 次轮询形成 1 秒发送周期。
+    assert(photoelectric_tcp_is_send_due(99U, 100U) == 0U);
+    assert(photoelectric_tcp_is_send_due(100U, 100U) == 1U);
+    assert(photoelectric_tcp_is_send_due(101U, 100U) == 1U);
     assert(photoelectric_tcp_is_send_due(0U, 0U) == 0U);
 
     puts("Photoelectric sensor tests passed.");

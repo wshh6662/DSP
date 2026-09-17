@@ -1,14 +1,13 @@
 //#############################################################################
 // FILE:   photoelectric_tcp_payload.c
-// TITLE:  转盘转速 + 光电检测 TCP 文本生成
+// TITLE:  编码器转速 + 光电检测 + 当前角度 TCP 文本生成
 //#############################################################################
 //
-// 发送格式（每约 50 ms 一行）：
-//   speed=29.29,photo=1\r\n
-//   speed=-12.50,photo=0\r\n
-//   speed=0.00,photo=0\r\n
+// 发送格式（每约 1 秒一行）：
+//   enc_rpm=29.29,obj=1,angle=359.91\r\n
+//   enc_rpm=-29.29,obj=0,angle=0.00\r\n
 //
-// 转速由 0.01 rpm 的定点整数手工转换成 ASCII，不用 sprintf 的浮点格式化：
+// 转速是 0.01 rpm 的定点整数，手工转换成 ASCII，不用 sprintf 浮点格式化：
 //   2929  -> "29.29"
 //   -1250 -> "-12.50"
 //   0     -> "0.00"
@@ -16,45 +15,44 @@
 
 #include "photoelectric_tcp_payload.h"
 
-// 逐字节写入：容量不足时返回 0，否则返回新的写入位置。
-static uint16_t payload_append_char(photoelectric_octet_t *payload,
-                                    uint16_t payload_capacity,
-                                    uint16_t length,
-                                    char value)
+// 带容量保护的写入器：一旦越界就置 overflow 并停止写入，绝不写第 capacity 个字节。
+typedef struct
 {
-    if (length >= payload_capacity)
+    photoelectric_octet_t *buffer;
+    uint16_t capacity;
+    uint16_t length;
+    uint16_t overflow;
+} payload_writer_t;
+
+static void payload_write_char(payload_writer_t *writer, char value)
+{
+    if (writer->overflow != 0U)
     {
-        return 0U;
+        return;
     }
 
-    payload[length] = (photoelectric_octet_t)value;
-    return (uint16_t)(length + 1U);
+    if (writer->length >= writer->capacity)
+    {
+        writer->overflow = 1U;
+        return;
+    }
+
+    writer->buffer[writer->length] = (photoelectric_octet_t)value;
+    writer->length++;
 }
 
-static uint16_t payload_append_text(photoelectric_octet_t *payload,
-                                    uint16_t payload_capacity,
-                                    uint16_t length,
-                                    const char *text)
+static void payload_write_text(payload_writer_t *writer, const char *text)
 {
     while (*text != '\0')
     {
-        length = payload_append_char(payload, payload_capacity, length, *text);
-        if (length == 0U)
-        {
-            return 0U;
-        }
-
+        payload_write_char(writer, *text);
         text++;
     }
-
-    return length;
 }
 
 // 把 0.01 rpm 定点数写成 "整数.两位小数"，带前导负号。
-static uint16_t payload_append_rpm_x100(photoelectric_octet_t *payload,
-                                        uint16_t payload_capacity,
-                                        uint16_t length,
-                                        int32_t speed_rpm_x100)
+static void payload_write_fixed_x100(payload_writer_t *writer,
+                                     int32_t value_x100)
 {
     uint32_t magnitude;
     uint32_t whole;
@@ -63,20 +61,15 @@ static uint16_t payload_append_rpm_x100(photoelectric_octet_t *payload,
     uint16_t digit_count = 0U;
     uint16_t index;
 
-    if (speed_rpm_x100 < 0)
+    if (value_x100 < 0)
     {
         // 先写负号，再用 -(value + 1) + 1 取绝对值，避免 INT32_MIN 直接取负溢出。
-        length = payload_append_char(payload, payload_capacity, length, '-');
-        if (length == 0U)
-        {
-            return 0U;
-        }
-
-        magnitude = (uint32_t)(-(speed_rpm_x100 + 1)) + 1U;
+        payload_write_char(writer, '-');
+        magnitude = (uint32_t)(-(value_x100 + 1)) + 1U;
     }
     else
     {
-        magnitude = (uint32_t)speed_rpm_x100;
+        magnitude = (uint32_t)value_x100;
     }
 
     whole = magnitude / 100U;
@@ -92,82 +85,47 @@ static uint16_t payload_append_rpm_x100(photoelectric_octet_t *payload,
 
     for (index = digit_count; index > 0U; index--)
     {
-        length = payload_append_char(payload,
-                                     payload_capacity,
-                                     length,
-                                     digits[index - 1U]);
-        if (length == 0U)
-        {
-            return 0U;
-        }
+        payload_write_char(writer, digits[index - 1U]);
     }
 
-    length = payload_append_char(payload, payload_capacity, length, '.');
-    if (length == 0U)
-    {
-        return 0U;
-    }
+    payload_write_char(writer, '.');
 
     // 小数部分固定两位、不足补零。
-    length = payload_append_char(payload,
-                                 payload_capacity,
-                                 length,
-                                 (char)('0' + (char)(fraction / 10U)));
-    if (length == 0U)
-    {
-        return 0U;
-    }
-
-    return payload_append_char(payload,
-                               payload_capacity,
-                               length,
-                               (char)('0' + (char)(fraction % 10U)));
+    payload_write_char(writer, (char)('0' + (char)(fraction / 10U)));
+    payload_write_char(writer, (char)('0' + (char)(fraction % 10U)));
 }
 
 uint16_t photoelectric_tcp_build_payload(
     uint16_t detected,
-    int32_t speed_rpm_x100,
+    int32_t encoder_rpm_x100,
+    int32_t angle_degrees_x100,
     photoelectric_octet_t *payload,
     uint16_t payload_capacity)
 {
-    uint16_t length;
+    payload_writer_t writer;
 
     if (payload == 0)
     {
         return 0U;
     }
 
-    length = payload_append_text(payload, payload_capacity, 0U, "speed=");
-    if (length == 0U)
-    {
-        return 0U;
-    }
+    writer.buffer = payload;
+    writer.capacity = payload_capacity;
+    writer.length = 0U;
+    writer.overflow = 0U;
 
-    length = payload_append_rpm_x100(payload,
-                                     payload_capacity,
-                                     length,
-                                     speed_rpm_x100);
-    if (length == 0U)
-    {
-        return 0U;
-    }
+    payload_write_text(&writer, "enc_rpm=");
+    payload_write_fixed_x100(&writer, encoder_rpm_x100);
 
-    length = payload_append_text(payload, payload_capacity, length, ",photo=");
-    if (length == 0U)
-    {
-        return 0U;
-    }
+    payload_write_text(&writer, ",obj=");
+    payload_write_char(&writer, (detected != 0U) ? '1' : '0');
 
-    length = payload_append_char(payload,
-                                 payload_capacity,
-                                 length,
-                                 (detected != 0U) ? '1' : '0');
-    if (length == 0U)
-    {
-        return 0U;
-    }
+    payload_write_text(&writer, ",angle=");
+    payload_write_fixed_x100(&writer, angle_degrees_x100);
 
-    return payload_append_text(payload, payload_capacity, length, "\r\n");
+    payload_write_text(&writer, "\r\n");
+
+    return (writer.overflow != 0U) ? 0U : writer.length;
 }
 
 uint16_t photoelectric_tcp_is_send_due(uint16_t elapsed_ticks,

@@ -11,6 +11,10 @@
 #include <stdint.h>
 #include <string.h>
 
+// 一行报文的长度：359.91 度 34 字节，0.00 度 32 字节。
+#define FRAME_POSITION_LENGTH   34U
+#define FRAME_ZERO_LENGTH       32U
+
 static uint8_t stub_socket_status = SOCK_CLOSED;
 static uint8_t stub_socket_interrupt = 0U;
 static uint8_t stub_version = 0x04U;
@@ -22,8 +26,20 @@ static uint16_t stub_close_calls = 0U;
 static uint16_t stub_disconnect_calls = 0U;
 static uint16_t stub_send_calls = 0U;
 static uint16_t stub_sent_data_length = 0U;
-static uint8_t stub_sent_data[96];
+static uint8_t stub_sent_data[256];
+static uint8_t stub_received_data[16];
+static uint16_t stub_received_data_length = 0U;
+static uint16_t stub_received_data_offset = 0U;
+static uint16_t stub_recv_calls = 0U;
 static wiz_NetInfo stub_network;
+
+static void queue_received_text(const char *text)
+{
+    stub_received_data_length = (uint16_t)strlen(text);
+    assert(stub_received_data_length <= (uint16_t)sizeof(stub_received_data));
+    memcpy(stub_received_data, text, stub_received_data_length);
+    stub_received_data_offset = 0U;
+}
 
 void test_device_delay_us(uint32_t delay_us)
 {
@@ -101,6 +117,12 @@ uint8_t getSn_IR(uint8_t socket_number)
     return stub_socket_interrupt;
 }
 
+uint16_t getSn_RX_RSR(uint8_t socket_number)
+{
+    assert(socket_number == PHOTOELECTRIC_TCP_SOCKET);
+    return (uint16_t)(stub_received_data_length - stub_received_data_offset);
+}
+
 void setSn_IR(uint8_t socket_number, uint8_t value)
 {
     assert(socket_number == PHOTOELECTRIC_TCP_SOCKET);
@@ -175,6 +197,24 @@ int32_t send(uint8_t socket_number, uint8_t *buffer, uint16_t length)
     return (int32_t)bytes_to_send;
 }
 
+int32_t recv(uint8_t socket_number, uint8_t *buffer, uint16_t length)
+{
+    uint16_t available;
+    uint16_t receive_length;
+
+    assert(socket_number == PHOTOELECTRIC_TCP_SOCKET);
+    assert(buffer != 0);
+    stub_recv_calls++;
+
+    available = getSn_RX_RSR(socket_number);
+    receive_length = (length < available) ? length : available;
+    memcpy(buffer, &stub_received_data[stub_received_data_offset],
+           receive_length);
+    stub_received_data_offset = (uint16_t)(stub_received_data_offset +
+                                           receive_length);
+    return (int32_t)receive_length;
+}
+
 // 校验从 offset 开始、长度 length 的一行报文与期望完全一致。
 static void assert_frame(uint16_t offset, uint16_t length, const char *expected)
 {
@@ -190,35 +230,16 @@ static void assert_frame(uint16_t offset, uint16_t length, const char *expected)
 int main(void)
 {
     uint16_t index;
-    photoelectric_octet_t longest[PHOTOELECTRIC_TCP_PAYLOAD_CAPACITY];
+    photoelectric_octet_t probe[PHOTOELECTRIC_TCP_PAYLOAD_CAPACITY];
 
-    // W5500 发送缓冲区至少要能放下整行报文。
-    assert(PHOTOELECTRIC_TCP_PAYLOAD_CAPACITY >= 48U);
+    // W5500 发送缓冲区要覆盖 INT32_MIN 转速和 359.91 度。
+    assert(PHOTOELECTRIC_TCP_PAYLOAD_CAPACITY >= 38U);
 
-    // 最坏情况：INT32_MIN 写成 "-21474836.48"，整行也只有 28 个 octet。
-    assert(photoelectric_tcp_build_payload(1U,
-                                           (-2147483647 - 1),
-                                           longest,
-                                           PHOTOELECTRIC_TCP_PAYLOAD_CAPACITY)
-           == 28U);
-
-    // 容量不足时必须整体拒绝，不能发出半截报文。
-    // 10 正好卡在 rpm 最后一位小数上，20 卡在结尾 CR 上，必须都能挡住。
-    assert(photoelectric_tcp_build_payload(1U, 2929, longest, 10U) == 0U);
-    assert(photoelectric_tcp_build_payload(1U, 2929, longest, 20U) == 0U);
-    assert(photoelectric_tcp_build_payload(1U, 2929, longest, 21U) == 21U);
-
-    // 容量之外一个字节都不能写。
-    {
-        uint8_t guarded[16];
-
-        memset(guarded, 0xAA, sizeof(guarded));
-        assert(photoelectric_tcp_build_payload(1U, 2929, guarded, 10U) == 0U);
-        for (index = 10U; index < (uint16_t)sizeof(guarded); index++)
-        {
-            assert(guarded[index] == 0xAAU);
-        }
-    }
+    // 容量不足时必须整体拒绝，正好够时必须完整成帧。
+    assert(photoelectric_tcp_build_payload(1U, 2929, 35991, probe, 33U) == 0U);
+    assert(photoelectric_tcp_build_payload(1U, 2929, 35991, probe,
+                                           FRAME_POSITION_LENGTH)
+           == FRAME_POSITION_LENGTH);
 
     assert(photoelectric_tcp_server_init() == 0);
     assert(stub_network.ip[0] == 192U);
@@ -228,94 +249,110 @@ int main(void)
     assert(stub_network.ip[3] == 20U);
 
     stub_socket_status = SOCK_CLOSED;
-    photoelectric_tcp_server_poll(0U, 0);
+    assert(photoelectric_tcp_server_poll(0U, 0, 0) == 0);
     assert(stub_socket_calls == 1U);
 
     stub_socket_status = SOCK_INIT;
-    photoelectric_tcp_server_poll(0U, 0);
+    assert(photoelectric_tcp_server_poll(0U, 0, 0) == 0);
     assert(stub_listen_calls == 1U);
 
-    // 正转 29.29 rpm 且检测到物品：报文为 speed=29.29,photo=1。
+    // 编码器 29.29、检测到物品，当前位置为 359.91 度。
     stub_socket_status = SOCK_ESTABLISHED;
     stub_socket_interrupt = Sn_IR_CON;
-    for (index = 0U; index < 4U; index++)
+    for (index = 0U; index < 99U; index++)
     {
-        photoelectric_tcp_server_poll(1U, 2929);
+        assert(photoelectric_tcp_server_poll(1U, 2929, 35991) == 0);
     }
     assert(stub_send_calls == 0U);
 
-    photoelectric_tcp_server_poll(1U, 2929);
+    assert(photoelectric_tcp_server_poll(1U, 2929, 35991) == 0);
     assert(stub_send_calls == 1U);
-    assert_frame(0U, 21U, "speed=29.29,photo=1\r\n");
+    assert_frame(0U, FRAME_POSITION_LENGTH,
+                 "enc_rpm=29.29,obj=1,angle=359.91\r\n");
     assert(g_photoelectric_tcp_send_count == 1U);
 
-    // 反转 12.50 rpm 且无物品：报文为 speed=-12.50,photo=0。
-    for (index = 0U; index < 5U; index++)
+    // TCP 命令可能分成多个数据包；先收到 r 不复位，随后收到 e 才触发一次。
+    queue_received_text("r");
+    assert(photoelectric_tcp_server_poll(0U, 0, 0) == 0);
+    queue_received_text("e");
+    assert(photoelectric_tcp_server_poll(0U, 0, 0) == 1);
+    assert(stub_recv_calls == 2U);
+
+    // 复位后的角度为 0.00，且重新等待完整的一秒发送周期。
+    for (index = 0U; index < 100U; index++)
     {
-        photoelectric_tcp_server_poll(0U, -1250);
+        assert(photoelectric_tcp_server_poll(0U, 2929, 0) == 0);
     }
     assert(stub_send_calls == 2U);
-    assert_frame(21U, 22U, "speed=-12.50,photo=0\r\n");
+    assert_frame(FRAME_POSITION_LENGTH, FRAME_ZERO_LENGTH,
+                 "enc_rpm=29.29,obj=0,angle=0.00\r\n");
     assert(g_photoelectric_tcp_send_count == 2U);
 
     // 分段发送：先重新建立连接，再把 send() 限成每次 1 个字节。
     stub_socket_status = SOCK_CLOSED;
-    photoelectric_tcp_server_poll(0U, 0);
+    assert(photoelectric_tcp_server_poll(0U, 0, 0) == 0);
     stub_socket_status = SOCK_ESTABLISHED;
     stub_send_result = 1;
-    for (index = 0U; index < 5U; index++)
+    for (index = 0U; index < 100U; index++)
     {
-        photoelectric_tcp_server_poll(1U, 2929);
+        assert(photoelectric_tcp_server_poll(1U, 2929, 27000) == 0);
     }
     assert(stub_send_calls == 3U);
     assert(g_photoelectric_tcp_send_count == 2U);
 
-    // 旧报文没发完之前，新状态不能覆盖发送缓冲区：这一段必须还是 speed=29.29,photo=1。
-    // 一共 21 个字节，已经发出 1 个，剩下 20 次轮询发完。
-    for (index = 0U; index < 19U; index++)
+    // 旧报文没发完之前，新状态不能覆盖发送缓冲区：这一段必须还是刚才那一帧。
+    // 一共 34 个字节，已经发出 1 个，剩下 33 次轮询发完。
+    for (index = 0U; index < 32U; index++)
     {
-        photoelectric_tcp_server_poll(0U, -1250);
+        assert(photoelectric_tcp_server_poll(0U, 1, 90) == 0);
     }
     assert(g_photoelectric_tcp_send_count == 2U);
-    photoelectric_tcp_server_poll(0U, -1250);
+    assert(photoelectric_tcp_server_poll(0U, 1, 9000) == 0);
     assert(g_photoelectric_tcp_send_count == 3U);
-    assert_frame(43U, 21U, "speed=29.29,photo=1\r\n");
+    assert(stub_send_calls == 36U);
+    assert_frame((uint16_t)(FRAME_POSITION_LENGTH + FRAME_ZERO_LENGTH),
+                 FRAME_POSITION_LENGTH,
+                 "enc_rpm=29.29,obj=1,angle=270.00\r\n");
 
     // SOCK_BUSY：发送缓冲区满，既不能丢报文也不能断开连接。
     stub_socket_status = SOCK_CLOSED;
-    photoelectric_tcp_server_poll(0U, 0);
+    assert(photoelectric_tcp_server_poll(0U, 0, 0) == 0);
     stub_socket_status = SOCK_ESTABLISHED;
     stub_send_result = SOCK_BUSY;
-    for (index = 0U; index < 5U; index++)
+    for (index = 0U; index < 100U; index++)
     {
-        photoelectric_tcp_server_poll(1U, 2929);
+        assert(photoelectric_tcp_server_poll(1U, 2929, 35991) == 0);
     }
-    assert(stub_send_calls == 24U);
+    assert(stub_send_calls == 37U);
     assert(g_photoelectric_last_send_result == SOCK_BUSY);
     assert(g_photoelectric_tcp_send_count == 3U);
     assert(stub_close_calls == 0U);
     assert(stub_disconnect_calls == 0U);
 
     // 缓冲区恢复后先把这一帧发完，不会丢帧。
-    stub_send_result = 21;
-    photoelectric_tcp_server_poll(1U, 2929);
+    stub_send_result = FRAME_POSITION_LENGTH;
+    assert(photoelectric_tcp_server_poll(1U, 2929, 35991) == 0);
+    assert(stub_send_calls == 38U);
     assert(g_photoelectric_tcp_send_count == 4U);
-    assert_frame(64U, 21U, "speed=29.29,photo=1\r\n");
+    assert_frame((uint16_t)(FRAME_POSITION_LENGTH + FRAME_ZERO_LENGTH +
+                            FRAME_POSITION_LENGTH),
+                 FRAME_POSITION_LENGTH,
+                 "enc_rpm=29.29,obj=1,angle=359.91\r\n");
 
     // 真正的发送错误才断开，交给下一轮重连。
     stub_socket_status = SOCK_CLOSED;
-    photoelectric_tcp_server_poll(0U, 0);
+    assert(photoelectric_tcp_server_poll(0U, 0, 0) == 0);
     stub_socket_status = SOCK_ESTABLISHED;
     stub_send_result = -1;
-    for (index = 0U; index < 5U; index++)
+    for (index = 0U; index < 100U; index++)
     {
-        photoelectric_tcp_server_poll(1U, 2929);
+        assert(photoelectric_tcp_server_poll(1U, 2929, 35991) == 0);
     }
     assert(g_photoelectric_last_send_result == -1);
     assert(stub_close_calls == 1U);
 
     stub_socket_status = SOCK_CLOSE_WAIT;
-    photoelectric_tcp_server_poll(0U, 0);
+    assert(photoelectric_tcp_server_poll(0U, 0, 0) == 0);
     assert(stub_disconnect_calls == 1U);
     assert(stub_close_calls == 1U);
 

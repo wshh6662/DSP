@@ -8,6 +8,7 @@
 uint8_t getVERSIONR(void);
 uint8_t getSn_SR(uint8_t socket_number);
 uint8_t getSn_IR(uint8_t socket_number);
+uint16_t getSn_RX_RSR(uint8_t socket_number);
 void setSn_IR(uint8_t socket_number, uint8_t value);
 void setSn_KPALVTR(uint8_t socket_number, uint8_t value);
 

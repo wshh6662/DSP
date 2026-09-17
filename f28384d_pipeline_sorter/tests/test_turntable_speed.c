@@ -8,6 +8,8 @@
 #include "board.h"
 #include "device.h"
 #include "driverlib.h"
+#include "photoelectric_sensor.h"
+#include "turntable_angle.h"
 
 #include <assert.h>
 #include <stdint.h>
@@ -16,6 +18,7 @@
 
 // 编码器 3 位置桩：每次中断前由测试改写。
 static uint32_t stub_encoder3_position = 0U;
+static uint32_t stub_encoder3_set_position_count = 0U;
 
 // Timer0 配置桩：记录参数、调用顺序和运行状态。
 static uint32_t stub_timer_period = 0U;
@@ -60,6 +63,13 @@ uint32_t EQEP_getPosition(uint32_t base)
 {
     assert(base == myEQEP3_BASE);
     return stub_encoder3_position;
+}
+
+void EQEP_setPosition(uint32_t base, uint32_t position)
+{
+    assert(base == myEQEP3_BASE);
+    stub_encoder3_position = position;
+    stub_encoder3_set_position_count++;
 }
 
 void CPUTimer_stopTimer(uint32_t base)
@@ -146,6 +156,28 @@ bool Interrupt_enableGlobal(void)
 {
     stub_enable_global_count++;
     return false;
+}
+
+// 光电和当前角度模块不在本测试范围内，用记录桩验证 ISR 调用关系。
+static uint32_t stub_photo_update_count = 0U;
+static uint32_t stub_angle_update_count = 0U;
+static uint32_t stub_angle_init_count = 0U;
+static int32_t stub_last_angle_delta = 0;
+
+void photoelectric_sensor_update(void)
+{
+    stub_photo_update_count++;
+}
+
+void turntable_angle_update_delta(int32_t count_delta)
+{
+    stub_angle_update_count++;
+    stub_last_angle_delta = count_delta;
+}
+
+void turntable_angle_init(void)
+{
+    stub_angle_init_count++;
 }
 
 // 模拟一次 Timer0 中断：先摆好编码器位置，再调用注册过的 ISR。
@@ -305,6 +337,11 @@ int main(void)
     assert(stub_timer_overflow_clear_count == 31U);
     assert(stub_ack_group1_count == 30U);
 
+    // 同一个 10 ms 中断必须刷新光电边沿并把每次 delta 交给当前角度模块。
+    assert(stub_photo_update_count == 30U);
+    assert(stub_angle_update_count == 30U);
+    assert(stub_last_angle_delta == -5);
+
     // ISR 只允许清溢出标志：配置阶段的 9 次操作之后，日志里应当全是 'C'。
     assert(stub_timer_log_length == (9U + 30U));
     assert(strncmp(stub_timer_log, "TPRELCGIS", 9U) == 0);
@@ -325,6 +362,19 @@ int main(void)
     assert(turntable_speed_get_rpm_x100() == g_turntable_speed_rpm_x100);
     assert(stub_disable_global_count == 2U);
     assert(stub_enable_global_count == 2U);
+
+    // TCP 收到 re 后，硬件位置、测速基准和软件角度必须同步清零。
+    turntable_speed_reset_encoder3();
+    assert(stub_encoder3_position == 0U);
+    assert(stub_encoder3_set_position_count == 1U);
+    assert(g_turntable_encoder_position == 0U);
+    assert(g_turntable_previous_position == 0U);
+    assert(g_turntable_sample_delta == 0);
+    assert(g_turntable_accumulated_count == 0);
+    assert(g_turntable_speed_count_m == 0);
+    assert(g_turntable_speed_rpm_x100 == 0);
+    assert(g_turntable_speed_rpm == 0.0f);
+    assert(stub_angle_init_count == 1U);
 
     puts("Turntable speed tests passed.");
     return 0;

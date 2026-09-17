@@ -20,6 +20,7 @@
 #define CPUTIMER_EMULATIONMODE_RUNFREE                   0x0800U
 
 uint32_t EQEP_getPosition(uint32_t base);
+void EQEP_setPosition(uint32_t base, uint32_t position);
 int16_t EQEP_getDirection(uint32_t base);
 uint16_t EQEP_getInterruptStatus(uint32_t base);
 uint32_t EQEP_getIndexPositionLatch(uint32_t base);
