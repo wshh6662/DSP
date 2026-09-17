@@ -16,4 +16,8 @@
 #define myEQEP3_EQEPB_GPIO         29U
 #define myEQEP3_EQEPINDEX_GPIO     31U
 
+#define mySPI0_BASE                0x00007040U
+#define W5500_CS                   19U
+#define W5500_RST                  94U
+
 #endif

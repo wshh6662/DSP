@@ -8,8 +8,24 @@ if ($main_source -notmatch 'encoder_watch_update_encoder3\(\);') {
     throw 'The main loop must refresh encoder 3 Watch variables.'
 }
 
-if ($main_source -notmatch 'DEVICE_DELAY_US\(1000U\);') {
-    throw 'The encoder Watch loop delay must remain 1000 us.'
+if ($main_source -notmatch 'photoelectric_sensor_init\(\);') {
+    throw 'The photoelectric sensor must be initialized by main.'
+}
+
+if ($main_source -notmatch 'photoelectric_tcp_server_init\(\)') {
+    throw 'The photoelectric TCP server must be initialized by main.'
+}
+
+if ($main_source -notmatch 'photoelectric_sensor_update\(\);') {
+    throw 'The main loop must continuously refresh the photoelectric input.'
+}
+
+if ($main_source -notmatch 'photoelectric_tcp_server_poll\(g_photoelectric_detected\);') {
+    throw 'The main loop must publish the detected state over TCP.'
+}
+
+if ($main_source -notmatch 'DEVICE_DELAY_US\(10000U\);') {
+    throw 'The combined Watch and photoelectric loop delay must be 10000 us.'
 }
 
 foreach ($inactive_poll in @('ModbusTcpServerPoll', 'EncoderTcpServerPoll')) {
