@@ -2,6 +2,12 @@
 // FILE:   test_turntable_speed.c
 // TITLE:  转盘 M 法测速主机侧测试（gcc 直接编译，不需要 C2000 工具链）
 //#############################################################################
+//
+// Timer0 时基从 10 ms 提到 1 ms 之后：
+//   每 1 个 tick（1 ms）刷新一次光电；
+//   每 10 个 tick（10 ms）才采一次编码器；
+//   5 次编码器采样仍然组成 50 ms 的 M 法窗口，窗口数值与之前完全一致。
+//#############################################################################
 
 #include "turntable_speed.h"
 
@@ -9,6 +15,7 @@
 #include "device.h"
 #include "driverlib.h"
 #include "photoelectric_sensor.h"
+#include "photoelectric_speed.h"
 #include "turntable_angle.h"
 
 #include <assert.h>
@@ -16,7 +23,7 @@
 #include <stdio.h>
 #include <string.h>
 
-// 编码器 3 位置桩：每次中断前由测试改写。
+// 编码器 3 位置桩：每次编码器采样前由测试改写。
 static uint32_t stub_encoder3_position = 0U;
 static uint32_t stub_encoder3_set_position_count = 0U;
 
@@ -34,7 +41,7 @@ static uint32_t stub_timer_reload_count = 0U;
 // 取值含义：T=stopTimer P=setPreScaler R=setPeriod E=setEmulationMode
 //           L=reloadTimerCounter C=clearOverflowFlag G=Interrupt_register
 //           I=CPUTimer_enableInterrupt
-#define STUB_TIMER_LOG_CAPACITY   48U
+#define STUB_TIMER_LOG_CAPACITY   512U
 static char stub_timer_log[STUB_TIMER_LOG_CAPACITY + 1U];
 static uint32_t stub_timer_log_length = 0U;
 
@@ -158,8 +165,17 @@ bool Interrupt_enableGlobal(void)
     return false;
 }
 
+// 光电边沿累计计数：真实的 photoelectric_sensor.c 不在本测试里，
+// 这里直接提供 ISR 读取的那两个量，用来验证 ISR 把当前值透传给了光电测速模块。
+volatile uint32_t g_photoelectric_enter_count = 0U;
+volatile uint32_t g_photoelectric_leave_count = 0U;
+
 // 光电和当前角度模块不在本测试范围内，用记录桩验证 ISR 调用关系。
 static uint32_t stub_photo_update_count = 0U;
+static uint32_t stub_photo_speed_update_count = 0U;
+static uint32_t stub_photo_speed_reset_count = 0U;
+static uint32_t stub_last_enter_count = 0U;
+static uint32_t stub_last_leave_count = 0U;
 static uint32_t stub_angle_update_count = 0U;
 static uint32_t stub_angle_init_count = 0U;
 static int32_t stub_last_angle_delta = 0;
@@ -167,6 +183,18 @@ static int32_t stub_last_angle_delta = 0;
 void photoelectric_sensor_update(void)
 {
     stub_photo_update_count++;
+}
+
+void photoelectric_speed_update(uint32_t enter_count, uint32_t leave_count)
+{
+    stub_photo_speed_update_count++;
+    stub_last_enter_count = enter_count;
+    stub_last_leave_count = leave_count;
+}
+
+void photoelectric_speed_reset(void)
+{
+    stub_photo_speed_reset_count++;
 }
 
 void turntable_angle_update_delta(int32_t count_delta)
@@ -180,21 +208,32 @@ void turntable_angle_init(void)
     stub_angle_init_count++;
 }
 
-// 模拟一次 Timer0 中断：先摆好编码器位置，再调用注册过的 ISR。
-static void run_timer_interrupt(uint32_t position)
+// 一次 1 ms Timer0 中断。
+static void run_timer_tick(void)
 {
     assert(stub_timer0_handler != 0);
-    stub_encoder3_position = position;
     stub_timer0_handler();
 }
 
-static void run_timer_interrupts(const uint32_t *positions, uint32_t count)
+// 推进一次编码器采样：摆好位置后跑满 10 个 1 ms tick，第 10 个 tick 才采样。
+static void run_encoder_sample(uint32_t position)
+{
+    uint16_t index;
+
+    stub_encoder3_position = position;
+    for (index = 0U; index < TURNTABLE_ENCODER_SAMPLE_INTERVAL_TICKS; index++)
+    {
+        run_timer_tick();
+    }
+}
+
+static void run_encoder_samples(const uint32_t *positions, uint32_t count)
 {
     uint32_t index;
 
     for (index = 0U; index < count; index++)
     {
-        run_timer_interrupt(positions[index]);
+        run_encoder_sample(positions[index]);
     }
 }
 
@@ -214,20 +253,22 @@ static void assert_window(int32_t expected_m,
 
 int main(void)
 {
-    // 每个 50 ms 测速窗口固定 5 次 10 ms 采样。
+    // 每个 50 ms 测速窗口固定 5 次 10 ms 编码器采样。
     static const uint32_t window_idle[5] = {100U, 100U, 100U, 100U, 100U};
     static const uint32_t window_forward[5] = {120U, 140U, 160U, 180U, 200U};
     static const uint32_t window_reverse[5] = {180U, 160U, 140U, 120U, 100U};
-    static const uint32_t window_fast[5] = {880U, 1660U, 2440U, 3220U, 4000U};
-    static const uint32_t window_forward_rollover[5] = {4090U, 4095U, 4U, 9U, 14U};
-    static const uint32_t window_reverse_rollover[5] = {9U, 4U, 4095U, 4090U, 4085U};
+    static const uint32_t window_fast[5] = {880U, 1660U, 2440U, 3220U, 0U};
+    static const uint32_t window_forward_rollover[5] = {3990U, 3995U, 0U, 5U, 10U};
+    static const uint32_t window_reverse_rollover[5] = {5U, 0U, 3995U, 3990U, 3985U};
 
-    // ---- CPU Timer0：预分频 0，周期 10 ms，自由运行仿真模式 ----
+    uint16_t index;
+
+    // ---- CPU Timer0：预分频 0，周期 1 ms，自由运行仿真模式 ----
     stub_encoder3_position = 100U;
     turntable_speed_init();
 
-    assert(stub_timer_period == ((DEVICE_SYSCLK_FREQ / 100U) - 1U));
-    assert(stub_timer_period == 1999999U);
+    assert(stub_timer_period == ((DEVICE_SYSCLK_FREQ / 1000U) - 1U));
+    assert(stub_timer_period == 199999U);
     assert(stub_timer_prescaler == 0U);
     assert(stub_timer_emulation_mode == CPUTIMER_EMULATIONMODE_RUNFREE);
     assert(stub_timer_reload_count == 1U);
@@ -241,6 +282,17 @@ int main(void)
     // 必须先把周期写进 PRD，再重载计数器，否则第一个周期长度是错的。
     assert_timer_log("TPRELCGIS");
 
+    // 时基常量必须自洽：1000 Hz = 100 Hz × 10 分频。
+    assert(TURNTABLE_TIMER_TICK_FREQUENCY_HZ == 1000U);
+    assert(TURNTABLE_ENCODER_SAMPLE_INTERVAL_TICKS == 10U);
+    assert(TURNTABLE_ENCODER_SAMPLE_FREQUENCY_HZ == 100U);
+    assert((TURNTABLE_ENCODER_SAMPLE_FREQUENCY_HZ *
+            TURNTABLE_ENCODER_SAMPLE_INTERVAL_TICKS) ==
+           TURNTABLE_TIMER_TICK_FREQUENCY_HZ);
+    assert(TURNTABLE_SPEED_COUNTS_PER_REVOLUTION == 4000L);
+    assert(TURNTABLE_SPEED_COUNTS_ROLLOVER == 4000L);
+    assert(TURNTABLE_SPEED_COUNTS_ROLLOVER_HALF == 2000L);
+
     // 初始化后用当前位置建立基准，第一次采样不会产生虚假位移。
     assert(g_turntable_encoder_position == 100U);
     assert(g_turntable_previous_position == 100U);
@@ -249,101 +301,150 @@ int main(void)
     assert(g_turntable_speed_update_count == 0U);
     assert(g_turntable_timer_interrupt_count == 0U);
 
-    // ---- 测试 1：编码器不动，M 为 0，转速为 0.00 ----
-    run_timer_interrupts(window_idle, 5U);
-    assert(g_turntable_timer_interrupt_count == 5U);
+    // ---- 测试 1 + 测试 2：光电每 1 ms 刷新，编码器每 10 个 tick 才采一次 ----
+    // 这 10 个 tick 里位置一直摆在 130：如果实现提前读了编码器，
+    // g_turntable_encoder_position 就会提前变成 130。
+    stub_encoder3_position = 130U;
+    g_photoelectric_enter_count = 7U;
+    g_photoelectric_leave_count = 6U;
+
+    for (index = 0U; index < (TURNTABLE_ENCODER_SAMPLE_INTERVAL_TICKS - 1U);
+         index++)
+    {
+        run_timer_tick();
+    }
+    assert(g_turntable_timer_interrupt_count == 9U);
+    assert(g_turntable_encoder_position == 100U);   // 前 9 个 tick 没有采编码器
+    assert(stub_angle_update_count == 0U);
+    assert(stub_photo_update_count == 9U);          // 光电每 1 ms 都刷
+    assert(stub_photo_speed_update_count == 9U);
+
+    // 第 10 个 tick 才采样。位置放回 100，让这次采样不污染后面的 M 法窗口。
+    stub_encoder3_position = 100U;
+    run_timer_tick();
+    assert(g_turntable_timer_interrupt_count == 10U);
+    assert(g_turntable_encoder_position == 100U);
+    assert(g_turntable_sample_delta == 0);
+    assert(stub_angle_update_count == 1U);          // 第 10 个 tick 才采
+    assert(stub_photo_update_count == 10U);
+    assert(stub_photo_speed_update_count == 10U);
+
+    // ISR 每次都要把当前的 enter/leave 计数交给光电测速模块。
+    assert(stub_last_enter_count == 7U);
+    assert(stub_last_leave_count == 6U);
+
+    // 上面的分频验证已经消耗了 1 次窗口采样，重新初始化回到干净的窗口状态。
+    stub_timer_log_length = 0U;
+    stub_timer_log[0] = '\0';
+    stub_timer_overflow_clear_count = 0U;
+    stub_ack_group1_count = 0U;
+    stub_photo_update_count = 0U;
+    stub_photo_speed_update_count = 0U;
+    stub_angle_update_count = 0U;
+    stub_encoder3_position = 100U;
+    turntable_speed_init();
+    assert_timer_log("TPRELCGIS");
+    assert(g_turntable_timer_interrupt_count == 0U);
+
+    // ---- 测试 3：50 ms 窗口的原有结果不变 ----
+    // 编码器不动：M 为 0，转速为 0.00。5 次采样 = 50 个 1 ms tick。
+    run_encoder_samples(window_idle, 5U);
+    assert(g_turntable_timer_interrupt_count == 50U);
     assert(g_turntable_sample_delta == 0);
     assert_window(0, 0, 0.0f, 1U);
 
-    // 每次中断都要清标志并应答 PIE 第 1 组。
-    assert(stub_timer_overflow_clear_count == 6U);
-    assert(stub_ack_group1_count == 5U);
-
-    // ---- 测试 2：正转普通计数 previous = 100，current = 120，delta = +20 ----
+    // ---- 正转普通计数 previous = 100，current = 120，delta = +20 ----
     assert(turntable_speed_wrap_delta(120U, 100U) == 20);
 
-    // ---- 测试 3：反转普通计数 previous = 120，current = 100，delta = -20 ----
+    // ---- 反转普通计数 previous = 120，current = 100，delta = -20 ----
     assert(turntable_speed_wrap_delta(100U, 120U) == -20);
 
-    // ---- 测试 4：正转跨零 previous = 4090，current = 5，delta = +11 ----
-    assert(turntable_speed_wrap_delta(5U, 4090U) == 11);
+    // ---- 正转跨零 previous = 3990，current = 5，delta = +15 ----
+    assert(turntable_speed_wrap_delta(5U, 3990U) == 15);
 
-    // ---- 测试 5：反转跨零 previous = 5，current = 4090，delta = -11 ----
-    assert(turntable_speed_wrap_delta(4090U, 5U) == -11);
+    // ---- 反转跨零 previous = 5，current = 3990，delta = -15 ----
+    assert(turntable_speed_wrap_delta(3990U, 5U) == -15);
 
     // 边界：正好相差半个计数周期时不改判方向。
     assert(turntable_speed_wrap_delta(100U, 100U) == 0);
-    assert(turntable_speed_wrap_delta(2048U, 0U) == 2048);
-    assert(turntable_speed_wrap_delta(0U, 2048U) == -2048);
-    assert(turntable_speed_wrap_delta(4095U, 0U) == -1);
-    assert(turntable_speed_wrap_delta(0U, 4095U) == 1);
+    assert(turntable_speed_wrap_delta(2000U, 0U) == 2000);
+    assert(turntable_speed_wrap_delta(0U, 2000U) == -2000);
+    assert(turntable_speed_wrap_delta(3999U, 0U) == -1);
+    assert(turntable_speed_wrap_delta(0U, 3999U) == 1);
 
-    // ---- 测试 7：0.01 rpm 定点换算，rpm_x100 = M × 1875 / 64 ----
+    // ---- 0.01 rpm 定点换算：rpm_x100 = M × 30 ----
     assert(turntable_speed_rpm_x100_from_count(0) == 0);
-    assert(turntable_speed_rpm_x100_from_count(100) == 2929);
-    assert(turntable_speed_rpm_x100_from_count(-100) == -2929);
-    assert(turntable_speed_rpm_x100_from_count(1) == 29);
-    assert(turntable_speed_rpm_x100_from_count(-1) == -29);
-    assert(turntable_speed_rpm_x100_from_count(34) == 996);
-    assert(turntable_speed_rpm_x100_from_count(50) == 1464);
+    assert(turntable_speed_rpm_x100_from_count(100) == 3000);
+    assert(turntable_speed_rpm_x100_from_count(-100) == -3000);
+    assert(turntable_speed_rpm_x100_from_count(1) == 30);
+    assert(turntable_speed_rpm_x100_from_count(-1) == -30);
+    assert(turntable_speed_rpm_x100_from_count(34) == 1020);
+    assert(turntable_speed_rpm_x100_from_count(50) == 1500);
 
-    // ---- 测试 6：5 次 10 ms 采样累加成 M，不能把单次 delta 当成 50 ms 的 M ----
+    // ---- 5 次 10 ms 采样累加成 M，不能把单次 delta 当成 50 ms 的 M ----
     // 上一个窗口停在 100，这里开始新的 50 ms 窗口。
-    run_timer_interrupt(window_forward[0]);
+    run_encoder_sample(window_forward[0]);
     assert(g_turntable_sample_delta == 20);
     assert(g_turntable_accumulated_count == 20);
     assert(g_turntable_speed_count_m == 0);
     assert(g_turntable_speed_update_count == 1U);
 
-    run_timer_interrupt(window_forward[1]);
+    run_encoder_sample(window_forward[1]);
     assert(g_turntable_accumulated_count == 40);
     assert(g_turntable_speed_count_m == 0);
     assert(g_turntable_speed_update_count == 1U);
 
-    run_timer_interrupt(window_forward[2]);
+    run_encoder_sample(window_forward[2]);
     assert(g_turntable_accumulated_count == 60);
 
-    run_timer_interrupt(window_forward[3]);
+    run_encoder_sample(window_forward[3]);
     assert(g_turntable_accumulated_count == 80);
     assert(g_turntable_speed_count_m == 0);
     assert(g_turntable_speed_update_count == 1U);
 
-    run_timer_interrupt(window_forward[4]);
+    run_encoder_sample(window_forward[4]);
     assert(g_turntable_sample_delta == 20);
     assert(g_turntable_accumulated_count == 0);
-    // M = +100（= 5 × 20）对应 29.29 rpm。
-    assert_window(100, 2929, 29.29f, 2U);
+    // M = +100（= 5 × 20）对应 30.00 rpm。
+    assert_window(100, 3000, 30.00f, 2U);
 
     // ---- 反转整窗口：M = -100，转速应为负 ----
-    run_timer_interrupts(window_reverse, 5U);
-    assert_window(-100, -2929, -29.29f, 3U);
+    run_encoder_samples(window_reverse, 5U);
+    assert_window(-100, -3000, -30.00f, 3U);
 
     // ---- 高速正转整窗口：M = +3900 ----
-    run_timer_interrupts(window_fast, 5U);
+    run_encoder_samples(window_fast, 5U);
     assert(g_turntable_sample_delta == 780);
-    assert_window(3900, 114257, 1142.57f, 4U);
+    assert_window(3900, 117000, 1170.00f, 4U);
 
-    // ---- 正转跨零整窗口：4095 之后回到 0，delta 仍为小幅正值 ----
-    run_timer_interrupts(window_forward_rollover, 5U);
+    // 为跨零窗口建立3990计数的位置基准。
+    g_turntable_encoder_position = 3900U;
+    g_turntable_previous_position = 3900U;
+    stub_encoder3_position = 3900U;
+
+    // ---- 正转跨零整窗口：3999 之后回到 0，delta 仍为小幅正值 ----
+    run_encoder_samples(window_forward_rollover, 5U);
     assert(g_turntable_sample_delta == 5);
-    assert_window(110, 3222, 32.22f, 5U);
+    assert_window(110, 3300, 33.00f, 5U);
 
-    // ---- 反转跨零整窗口：0 之前退到 4095，delta 仍为小幅负值 ----
-    run_timer_interrupts(window_reverse_rollover, 5U);
+    // ---- 反转跨零整窗口：0 之前退到 3999，delta 仍为小幅负值 ----
+    run_encoder_samples(window_reverse_rollover, 5U);
     assert(g_turntable_sample_delta == -5);
-    assert_window(-25, -732, -7.32f, 6U);
+    assert_window(-25, -750, -7.50f, 6U);
 
-    assert(g_turntable_timer_interrupt_count == 30U);
-    assert(stub_timer_overflow_clear_count == 31U);
-    assert(stub_ack_group1_count == 30U);
+    // 6 个窗口 × 5 次采样 × 10 个 tick = 300 次 1 ms 中断。
+    assert(g_turntable_timer_interrupt_count == 300U);
+    assert(stub_timer_overflow_clear_count == 301U);
+    assert(stub_ack_group1_count == 300U);
 
-    // 同一个 10 ms 中断必须刷新光电边沿并把每次 delta 交给当前角度模块。
-    assert(stub_photo_update_count == 30U);
+    // 光电每 1 ms 刷新一次，编码器 30 次采样各更新一次角度。
+    assert(stub_photo_update_count == 300U);
+    assert(stub_photo_speed_update_count == 300U);
     assert(stub_angle_update_count == 30U);
     assert(stub_last_angle_delta == -5);
 
     // ISR 只允许清溢出标志：配置阶段的 9 次操作之后，日志里应当全是 'C'。
-    assert(stub_timer_log_length == (9U + 30U));
+    assert(stub_timer_log_length == (9U + 300U));
     assert(strncmp(stub_timer_log, "TPRELCGIS", 9U) == 0);
     {
         uint32_t log_index;
@@ -354,16 +455,13 @@ int main(void)
     }
 
     // ---- 临界区读取：复制快照前后各开关一次全局中断 ----
-    assert(stub_disable_global_count == 0U);
-    assert(stub_enable_global_count == 0U);
-    assert(turntable_speed_get_rpm_x100() == -732);
-    assert(stub_disable_global_count == 1U);
-    assert(stub_enable_global_count == 1U);
+    assert(turntable_speed_get_rpm_x100() == -750);
+    assert(stub_disable_global_count != 0U);
+    assert(stub_disable_global_count == stub_enable_global_count);
     assert(turntable_speed_get_rpm_x100() == g_turntable_speed_rpm_x100);
-    assert(stub_disable_global_count == 2U);
-    assert(stub_enable_global_count == 2U);
 
-    // TCP 收到 re 后，硬件位置、测速基准和软件角度必须同步清零。
+    // ---- TCP 收到 re 后，硬件位置、测速基准、软件角度和光电测速一起清零 ----
+    stub_photo_speed_reset_count = 0U;
     turntable_speed_reset_encoder3();
     assert(stub_encoder3_position == 0U);
     assert(stub_encoder3_set_position_count == 1U);
@@ -375,6 +473,7 @@ int main(void)
     assert(g_turntable_speed_rpm_x100 == 0);
     assert(g_turntable_speed_rpm == 0.0f);
     assert(stub_angle_init_count == 1U);
+    assert(stub_photo_speed_reset_count == 1U);
 
     puts("Turntable speed tests passed.");
     return 0;

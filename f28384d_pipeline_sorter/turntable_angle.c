@@ -6,7 +6,7 @@
 #include "driverlib.h"
 #include "turntable_angle.h"
 
-volatile int32_t g_turntable_angle_accumulated_counts = 0; // 复位零点后的单圈位置计数，范围 0～4095
+volatile int32_t g_turntable_angle_accumulated_counts = 0; // 复位零点后的单圈位置计数，范围 0～3999
 
 void turntable_angle_init(void)
 {

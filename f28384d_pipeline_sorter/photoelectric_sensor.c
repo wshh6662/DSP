@@ -32,7 +32,6 @@ void photoelectric_sensor_init(void)
     g_photoelectric_enter_count = 0U;
     g_photoelectric_leave_count = 0U;
 }
-
 void photoelectric_sensor_update(void)
 {
     g_photoelectric_raw_level =

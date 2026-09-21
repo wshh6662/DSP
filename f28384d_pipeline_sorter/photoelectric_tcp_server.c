@@ -178,6 +178,7 @@ int photoelectric_tcp_server_init(void)
 
 int32_t photoelectric_tcp_server_poll(uint16_t detected,
                                       int32_t encoder_rpm_x100,
+                                      int32_t optical_rpm_x100,
                                       int32_t angle_degrees_x100)
 {
     static photoelectric_octet_t payload[PHOTOELECTRIC_TCP_PAYLOAD_CAPACITY];
@@ -244,6 +245,7 @@ int32_t photoelectric_tcp_server_poll(uint16_t detected,
             payload_length = photoelectric_tcp_build_payload(
                 detected,
                 encoder_rpm_x100,
+                optical_rpm_x100,
                 angle_degrees_x100,
                 payload,
                 PHOTOELECTRIC_TCP_PAYLOAD_CAPACITY);

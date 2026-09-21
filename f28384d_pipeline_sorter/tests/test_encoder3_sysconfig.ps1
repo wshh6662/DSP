@@ -41,7 +41,7 @@ try {
         throw 'Generated myEQEP3_init() was not found.'
     }
 
-    $expected = 'EQEP_setPositionCounterConfig(myEQEP3_BASE,EQEP_POSITION_RESET_MAX_POS,4095U);'
+    $expected = 'EQEP_setPositionCounterConfig(myEQEP3_BASE,EQEP_POSITION_RESET_MAX_POS,3999U);'
     if (-not $encoder3_init.Groups['body'].Value.Contains($expected)) {
         throw "Encoder 3 generated position configuration is incorrect. Expected: $expected"
     }

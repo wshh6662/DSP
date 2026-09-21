@@ -1,57 +1,72 @@
 //#############################################################################
 // FILE:   turntable_speed.c
-// TITLE:  F28384D 转盘转速 M 法测量（CPU Timer0 10 ms 采样）
+// TITLE:  F28384D 转盘转速 M 法测量（CPU Timer0 1 ms 时基）
 //#############################################################################
 //
 // M 法测速原理：
-//   1. CPU Timer0 每 10 ms 触发一次中断，读取 EQEP_getPosition(myEQEP3_BASE)；
-//   2. 本次位置减上次位置得到带方向的计数差 delta，并处理 0～4095 回绕；
+//   1. CPU Timer0 每 1 ms 触发一次中断，但编码器每 10 个 tick（即 10 ms）才采一次，
+//      读取 EQEP_getPosition(myEQEP3_BASE)；
+//   2. 本次位置减上次位置得到带方向的计数差 delta，并处理 0～3999 回绕；
 //   3. 连续 5 次 10 ms 的 delta 累加成一个 50 ms 测速窗口，累加值就是 M；
-//   4. rpm = 60 × M / (4096 × 0.05) = M × 0.29296875。
+//   4. rpm = 60 × M / (4000 × 0.05) = M × 0.3。
+//
+// 时基从 10 ms 提到 1 ms 只是为了给光电单瓶遮挡时间测速提供 1 ms 分辨率；
+// 编码器的采样率、M 法窗口长度和计算方式都没有变。
 //
 // 主用百分之一 rpm 的定点整数表示转速，中断里只做整数乘除，浮点值仅用于 CCS Watch：
-//   speed_rpm_x100 = M × 1875 / 64
-//   例：M = 100   -> 2929   ->  29.29 rpm
-//       M = -100  -> -2929  -> -29.29 rpm（负号表示反转）
+//   speed_rpm_x100 = M × 30
+//   例：M = 100   -> 3000   ->  30.00 rpm
+//       M = -100  -> -3000  -> -30.00 rpm（负号表示反转）
 //       M = 0     -> 0      ->   0.00 rpm
 //
 // 测速窗口长度只由 Timer0 决定，和主循环里的 TCP 轮询、DEVICE_DELAY_US 无关，
 // 所以 W5500 收发造成的周期抖动不会污染测速结果。
 //
-// 同一个 10 ms 中断还负责刷新光电上升沿/下降沿，并把编码器计数差交给
-// turntable_angle.c 计算复位零点后的单圈实时角度。
+// 这个 1 ms 中断同时是另外几个模块的时基：
+//   photoelectric_sensor.c  刷新光电上升沿/下降沿
+//   photoelectric_speed.c   单瓶遮挡时间测速
+//   turntable_angle.c       由编码器计数差计算复位零点后的单圈实时角度
 //#############################################################################
 
 #include "driverlib.h"
 #include "device.h"
 #include "board.h"
 #include "photoelectric_sensor.h"
+#include "photoelectric_speed.h"
 #include "turntable_angle.h"
 #include "turntable_speed.h"
 
+// 光电测速把"1 个 tick"当成 1 ms，两边必须同步；改动时基会在这里直接报错。
+#if (PHOTOELECTRIC_TIMEBASE_TICK_MS * TURNTABLE_TIMER_TICK_FREQUENCY_HZ) != 1000U
+#error "photoelectric_speed assumes a 1 ms tick; keep the Timer0 timebase in sync"
+#endif
+
 // ---- CCS Watch 变量 ----
-volatile uint32_t g_turntable_encoder_position = 0U;       // 当前读取的编码器 3 位置，范围 0～4095
-volatile uint32_t g_turntable_previous_position = 0U;      // 上一次 10 ms 采样的位置
-volatile int32_t  g_turntable_sample_delta = 0;            // 最近一次 10 ms 内的带方向计数差
+volatile uint32_t g_turntable_encoder_position = 0U;       // 当前读取的编码器 3 位置，范围 0～3999
+volatile uint32_t g_turntable_previous_position = 0U;      // 上一次 10 ms 采样的位置，范围 0～3999
+volatile int32_t  g_turntable_sample_delta = 0;            // 最近一次 10 ms 采样的带方向计数差
 volatile int32_t  g_turntable_accumulated_count = 0;       // 当前 50 ms 窗口内已累计的计数增量
 volatile int32_t  g_turntable_speed_count_m = 0;           // 最近一个 50 ms 测速窗口内的 M 值
 volatile int32_t  g_turntable_speed_rpm_x100 = 0;          // 带方向转速，单位 0.01 rpm
 volatile float    g_turntable_speed_rpm = 0.0f;            // 便于 CCS Watch 观察的浮点 rpm 值
 volatile uint32_t g_turntable_speed_update_count = 0U;     // 已完成的 50 ms 测速计算次数
-volatile uint32_t g_turntable_timer_interrupt_count = 0U;  // Timer0 中断累计次数
+volatile uint32_t g_turntable_timer_interrupt_count = 0U;  // Timer0 中断累计次数，1 ms 加一
 
 // 当前 50 ms 窗口内已经完成的 10 ms 采样次数。
 static uint16_t turntable_window_sample_count = 0U;
 
-// 10 ms 定时周期对应的 CPU Timer0 计数值。
-// DEVICE_SYSCLK_FREQ = 200 MHz，预分频为 0，所以 10 ms 需要 2000000 个 SYSCLK；
-// 计数器从周期值递减到 0 再重载，所以 PRD 写 2000000 - 1。
+// 1 ms 时基到 10 ms 编码器采样的分频计数。
+static uint16_t turntable_encoder_sample_divider = 0U;
+
+// 1 ms 定时周期对应的 CPU Timer0 计数值。
+// DEVICE_SYSCLK_FREQ = 200 MHz，预分频为 0，所以 1 ms 需要 200000 个 SYSCLK；
+// 计数器从周期值递减到 0 再重载，所以 PRD 写 200000 - 1。
 #define TURNTABLE_SPEED_TIMER_PERIOD_COUNT \
-    ((DEVICE_SYSCLK_FREQ / TURNTABLE_SPEED_TIMER_FREQUENCY_HZ) - 1U)
+    ((DEVICE_SYSCLK_FREQ / TURNTABLE_TIMER_TICK_FREQUENCY_HZ) - 1U)
 
 // 把本次位置与上次位置之差换算成带方向的计数增量。
-// QPOSCNT 在 0～4095 之间循环：正转跨零得到很大的负数，反转跨零得到很大的正数，
-// 超过半个计数周期就认为发生了回绕，加减一个 4096 换回真正的位移。
+// QPOSCNT 在 0～3999 之间循环：正转跨零得到很大的负数，反转跨零得到很大的正数，
+// 超过半个计数周期就认为发生了回绕，加减一个 4000 换回真正的位移。
 int32_t turntable_speed_wrap_delta(uint32_t current_position,
                                    uint32_t previous_position)
 {
@@ -69,11 +84,11 @@ int32_t turntable_speed_wrap_delta(uint32_t current_position,
     return delta;
 }
 
-// rpm = 60 × M / (4096 × 0.05) = M × 0.29296875
-// rpm × 100 = M × 29.296875 = M × 1875 / 64
+// rpm = 60 × M / (4000 × 0.05) = M × 0.3
+// rpm × 100 = M × 30
 int32_t turntable_speed_rpm_x100_from_count(int32_t count_m)
 {
-    return (int32_t)((count_m * 1875) / 64);
+    return count_m * 30L;
 }
 
 // 推进一次 10 ms 采样：算 delta、累加 M，满 5 次就发布一次转速。
@@ -109,16 +124,28 @@ static void turntable_speed_sample_position(uint32_t current_position)
     }
 }
 
-// Timer0 中断服务函数：先采编码器做 M 法和当前角度，再刷新光电边沿。
-// 中断内不做 TCP 发送或 ASCII 格式化，保证 10 ms 周期稳定。
+// Timer0 中断服务函数：1 ms 时基。
+//   每 1 ms ：刷新光电边沿，推进单瓶遮挡时间测速；
+//   每 10 ms：采一次编码器，做 M 法测速并更新单圈角度。
+// 中断内不做 TCP 发送、字符串拼接或浮点格式化。
 TURNTABLE_SPEED_ISR void turntable_speed_timer_isr(void)
 {
     g_turntable_timer_interrupt_count++;
 
-    turntable_speed_sample_position(EQEP_getPosition(myEQEP3_BASE));
-
-    // 用固定 10 ms 周期持续刷新光电当前状态及上升沿/下降沿。
+    // 光电边沿检测与遮挡时间测速：1 ms 分辨率。
     photoelectric_sensor_update();
+    photoelectric_speed_update(g_photoelectric_enter_count,
+                               g_photoelectric_leave_count);
+
+    // 编码器仍然每 10 ms 采样一次，M 法窗口与精度保持不变。
+    turntable_encoder_sample_divider++;
+    if (turntable_encoder_sample_divider >=
+        TURNTABLE_ENCODER_SAMPLE_INTERVAL_TICKS)
+    {
+        turntable_encoder_sample_divider = 0U;
+
+        turntable_speed_sample_position(EQEP_getPosition(myEQEP3_BASE));
+    }
 
     // Timer0 属于 PIE 第 1 组（INT1.7）。
     CPUTimer_clearOverflowFlag(CPUTIMER0_BASE);
@@ -138,8 +165,9 @@ void turntable_speed_init(void)
     g_turntable_speed_update_count = 0U;
     g_turntable_timer_interrupt_count = 0U;
     turntable_window_sample_count = 0U;
+    turntable_encoder_sample_divider = 0U;
 
-    // CPU Timer0：预分频 0，周期 10 ms（100 Hz），仿真时自由运行。
+    // CPU Timer0：预分频 0，周期 1 ms（1000 Hz），仿真时自由运行。
     // 这里用 Driverlib 直接配置，不动 SysConfig 里的 eQEP3 配置。
     CPUTimer_stopTimer(CPUTIMER0_BASE);
     CPUTimer_setPreScaler(CPUTIMER0_BASE, 0U);
@@ -188,7 +216,11 @@ void turntable_speed_reset_encoder3(void)
     g_turntable_speed_rpm_x100 = 0;
     g_turntable_speed_rpm = 0.0f;
     turntable_window_sample_count = 0U;
+    turntable_encoder_sample_divider = 0U;
     turntable_angle_init();
+
+    // 光电测速的开始时刻、速度和有效标志也一起清零。
+    photoelectric_speed_reset();
 
     if (interrupts_were_disabled == false)
     {
