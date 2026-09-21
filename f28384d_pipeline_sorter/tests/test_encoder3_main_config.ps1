@@ -12,8 +12,8 @@ if ($main_source -notmatch 'photoelectric_sensor_init\(\);') {
     throw 'The photoelectric sensor must be initialized by main.'
 }
 
-if ($main_source -notmatch 'photoelectric_speed_init\(\);') {
-    throw 'The photoelectric block-time speed module must be initialized by main.'
+if ($main_source -match 'photoelectric_speed') {
+    throw 'The removed photoelectric speed module must not be referenced by main.'
 }
 
 if ($main_source -notmatch 'turntable_angle_init\(\);') {
@@ -36,20 +36,16 @@ if ($main_source -notmatch 'turntable_speed_get_rpm_x100\(\);') {
     throw 'The main loop must take one encoder speed snapshot per iteration.'
 }
 
-if ($main_source -notmatch 'photoelectric_speed_get_rpm_x100\(\);') {
-    throw 'The main loop must take one photoelectric speed snapshot per iteration.'
-}
-
 if ($main_source -notmatch 'turntable_angle_get_degrees_x100\(\);') {
     throw 'The main loop must take one current-angle snapshot per iteration.'
 }
 
-if ($main_source -notmatch 'photoelectric_tcp_server_poll\(\s*g_photoelectric_detected\s*,\s*encoder_speed_snapshot\s*,\s*optical_speed_snapshot\s*,\s*angle_snapshot_x100\s*\)') {
-    throw 'The main loop must publish encoder speed, optical speed, object state and angle over TCP.'
+if ($main_source -notmatch 'photoelectric_tcp_server_poll\(\s*g_photoelectric_detected\s*,\s*encoder_speed_snapshot\s*,\s*angle_snapshot_x100\s*\)') {
+    throw 'The main loop must publish encoder speed, object state and angle over TCP.'
 }
 
 if ($main_source -notmatch 'turntable_speed_reset_encoder3\(\);') {
-    throw 'The re command must reset eQEP3, speed state, angle state and photoelectric speed together.'
+    throw 'The re command must reset eQEP3, speed state and angle state together.'
 }
 
 if ($main_source -notmatch 'DEVICE_DELAY_US\(10000U\);') {
@@ -89,8 +85,8 @@ if (-not $isr_body.Contains('photoelectric_sensor_update();')) {
     throw 'The Timer0 ISR must sample the photoelectric input.'
 }
 
-if (-not $isr_body.Contains('photoelectric_speed_update(g_photoelectric_enter_count,')) {
-    throw 'The Timer0 ISR must feed the edge counters into the photoelectric speed module.'
+if ($isr_body.Contains('photoelectric_speed')) {
+    throw 'The removed photoelectric speed module must not be referenced by the Timer0 ISR.'
 }
 
 if (-not $isr_body.Contains('TURNTABLE_ENCODER_SAMPLE_INTERVAL_TICKS')) {
@@ -111,11 +107,7 @@ if (-not $turntable_source.Contains('turntable_angle_update_delta(delta);')) {
     throw 'Every encoder delta must be passed to the current-angle calculator.'
 }
 
-if (-not $turntable_source.Contains('photoelectric_speed_reset();')) {
-    throw 'The re command must also reset the photoelectric speed state.'
-}
-
-# ---- 时基常量必须两边一致 ----
+# ---- 时基常量 ----
 $turntable_header = Get-Content -Raw -LiteralPath `
     (Join-Path $project_root 'turntable_speed.h')
 
@@ -131,15 +123,10 @@ if ($turntable_header -notmatch '#define\s+TURNTABLE_SPEED_SAMPLES_PER_WINDOW\s+
     throw 'The M-method window must still be 5 samples (50 ms).'
 }
 
-$speed_header = Get-Content -Raw -LiteralPath `
-    (Join-Path $project_root 'photoelectric_speed.h')
-
-if ($speed_header -notmatch '#define\s+PHOTOELECTRIC_TIMEBASE_TICK_MS\s+1U') {
-    throw 'The photoelectric timebase tick must be 1 ms.'
-}
-
-if ($main_source -match 'photoelectric_speed_timer_tick') {
-    throw 'The removed photoelectric_speed_timer_tick() entry point is still referenced by main.'
+foreach ($removed_file in @('photoelectric_speed.c', 'photoelectric_speed.h')) {
+    if (Test-Path (Join-Path $project_root $removed_file)) {
+        throw "The removed optical speed module file still exists: $removed_file"
+    }
 }
 
 Write-Host 'Encoder 3 main-loop configuration test passed.'

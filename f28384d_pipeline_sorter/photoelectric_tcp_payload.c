@@ -1,13 +1,13 @@
 //#############################################################################
 // FILE:   photoelectric_tcp_payload.c
-// TITLE:  编码器转速 + 光电转速 + 光电检测 + 当前角度 TCP 文本生成
+// TITLE:  编码器转速 + 光电检测 + 当前角度 TCP 文本生成
 //#############################################################################
 //
 // 发送格式（每约 1 秒一行）：
-//   enc_rpm=29.29,opt_rpm=16.00,obj=1,angle=359.91\r\n
-//   enc_rpm=-29.29,opt_rpm=0.00,obj=0,angle=0.00\r\n
+//   enc_rpm=29.29,obj=1,angle=359.91\r\n
+//   enc_rpm=-29.29,obj=0,angle=0.00\r\n
 //
-// 两段转速和角度都是 0.01 定标的定点整数，手工转换成 ASCII，
+// 编码器转速和角度都是 0.01 定标的定点整数，手工转换成 ASCII，
 // 不用 sprintf 浮点格式化：
 //   2929  -> "29.29"
 //   -1250 -> "-12.50"
@@ -99,7 +99,6 @@ static void payload_write_fixed_x100(payload_writer_t *writer,
 uint16_t photoelectric_tcp_build_payload(
     uint16_t detected,
     int32_t encoder_rpm_x100,
-    int32_t optical_rpm_x100,
     int32_t angle_degrees_x100,
     photoelectric_octet_t *payload,
     uint16_t payload_capacity)
@@ -118,9 +117,6 @@ uint16_t photoelectric_tcp_build_payload(
 
     payload_write_text(&writer, "enc_rpm=");
     payload_write_fixed_x100(&writer, encoder_rpm_x100);
-
-    payload_write_text(&writer, ",opt_rpm=");
-    payload_write_fixed_x100(&writer, optical_rpm_x100);
 
     payload_write_text(&writer, ",obj=");
     payload_write_char(&writer, (detected != 0U) ? '1' : '0');

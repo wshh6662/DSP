@@ -10,8 +10,7 @@
 //   3. 连续 5 次 10 ms 的 delta 累加成一个 50 ms 测速窗口，累加值就是 M；
 //   4. rpm = 60 × M / (4000 × 0.05) = M × 0.3。
 //
-// 时基从 10 ms 提到 1 ms 只是为了给光电单瓶遮挡时间测速提供 1 ms 分辨率；
-// 编码器的采样率、M 法窗口长度和计算方式都没有变。
+// 1 ms 时基用于及时采样光电输入；编码器的采样率、M 法窗口长度和计算方式都没有变。
 //
 // 主用百分之一 rpm 的定点整数表示转速，中断里只做整数乘除，浮点值仅用于 CCS Watch：
 //   speed_rpm_x100 = M × 30
@@ -24,7 +23,6 @@
 //
 // 这个 1 ms 中断同时是另外几个模块的时基：
 //   photoelectric_sensor.c  刷新光电上升沿/下降沿
-//   photoelectric_speed.c   单瓶遮挡时间测速
 //   turntable_angle.c       由编码器计数差计算复位零点后的单圈实时角度
 //#############################################################################
 
@@ -32,14 +30,8 @@
 #include "device.h"
 #include "board.h"
 #include "photoelectric_sensor.h"
-#include "photoelectric_speed.h"
 #include "turntable_angle.h"
 #include "turntable_speed.h"
-
-// 光电测速把"1 个 tick"当成 1 ms，两边必须同步；改动时基会在这里直接报错。
-#if (PHOTOELECTRIC_TIMEBASE_TICK_MS * TURNTABLE_TIMER_TICK_FREQUENCY_HZ) != 1000U
-#error "photoelectric_speed assumes a 1 ms tick; keep the Timer0 timebase in sync"
-#endif
 
 // ---- CCS Watch 变量 ----
 volatile uint32_t g_turntable_encoder_position = 0U;       // 当前读取的编码器 3 位置，范围 0～3999
@@ -125,17 +117,15 @@ static void turntable_speed_sample_position(uint32_t current_position)
 }
 
 // Timer0 中断服务函数：1 ms 时基。
-//   每 1 ms ：刷新光电边沿，推进单瓶遮挡时间测速；
+//   每 1 ms ：刷新光电边沿；
 //   每 10 ms：采一次编码器，做 M 法测速并更新单圈角度。
 // 中断内不做 TCP 发送、字符串拼接或浮点格式化。
 TURNTABLE_SPEED_ISR void turntable_speed_timer_isr(void)
 {
     g_turntable_timer_interrupt_count++;
 
-    // 光电边沿检测与遮挡时间测速：1 ms 分辨率。
+    // 光电边沿检测：1 ms 分辨率。
     photoelectric_sensor_update();
-    photoelectric_speed_update(g_photoelectric_enter_count,
-                               g_photoelectric_leave_count);
 
     // 编码器仍然每 10 ms 采样一次，M 法窗口与精度保持不变。
     turntable_encoder_sample_divider++;
@@ -218,9 +208,6 @@ void turntable_speed_reset_encoder3(void)
     turntable_window_sample_count = 0U;
     turntable_encoder_sample_divider = 0U;
     turntable_angle_init();
-
-    // 光电测速的开始时刻、速度和有效标志也一起清零。
-    photoelectric_speed_reset();
 
     if (interrupts_were_disabled == false)
     {

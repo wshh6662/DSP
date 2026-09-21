@@ -20,7 +20,7 @@ extern "C" {
 #define TURNTABLE_SPEED_COUNTS_ROLLOVER_HALF    2000L
 
 // CPU Timer0 时基：1 ms 一个 tick（1000 Hz）。
-// 时基提到 1 ms 是为了让光电单瓶遮挡时间的分辨率达到 1 ms，见 photoelectric_speed.c。
+// 1 ms 时基确保光电传感器的上升沿和下降沿能及时采样。
 #define TURNTABLE_TIMER_TICK_FREQUENCY_HZ       1000U
 
 // 编码器仍然按原来的 10 ms 采样：每 10 个 1 ms tick 才读一次 eQEP3，
@@ -55,10 +55,10 @@ void turntable_speed_init(void);
 // 内部在极短临界区内复制 ISR 正在更新的数值，避免 32 位数据被读成半新半旧。
 int32_t turntable_speed_get_rpm_x100(void);
 
-// 把 eQEP3 位置、测速基准、软件角度和光电测速状态同步清零，供 TCP "re" 命令调用。
+// 把 eQEP3 位置、测速基准和软件角度同步清零，供 TCP "re" 命令调用。
 void turntable_speed_reset_encoder3(void);
 
-// Timer0 中断服务函数：每 1 ms 刷新光电边沿与遮挡测速，
+// Timer0 中断服务函数：每 1 ms 刷新光电边沿，
 // 每 10 个 tick 才采一次编码器，更新 M 法转速和当前角度。
 TURNTABLE_SPEED_ISR void turntable_speed_timer_isr(void);
 

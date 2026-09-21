@@ -4,7 +4,7 @@
 //#############################################################################
 //
 // Timer0 时基从 10 ms 提到 1 ms 之后：
-//   每 1 个 tick（1 ms）刷新一次光电；
+//   每 1 个 tick（1 ms）刷新一次光电边沿；
 //   每 10 个 tick（10 ms）才采一次编码器；
 //   5 次编码器采样仍然组成 50 ms 的 M 法窗口，窗口数值与之前完全一致。
 //#############################################################################
@@ -15,7 +15,6 @@
 #include "device.h"
 #include "driverlib.h"
 #include "photoelectric_sensor.h"
-#include "photoelectric_speed.h"
 #include "turntable_angle.h"
 
 #include <assert.h>
@@ -165,17 +164,8 @@ bool Interrupt_enableGlobal(void)
     return false;
 }
 
-// 光电边沿累计计数：真实的 photoelectric_sensor.c 不在本测试里，
-// 这里直接提供 ISR 读取的那两个量，用来验证 ISR 把当前值透传给了光电测速模块。
-volatile uint32_t g_photoelectric_enter_count = 0U;
-volatile uint32_t g_photoelectric_leave_count = 0U;
-
 // 光电和当前角度模块不在本测试范围内，用记录桩验证 ISR 调用关系。
 static uint32_t stub_photo_update_count = 0U;
-static uint32_t stub_photo_speed_update_count = 0U;
-static uint32_t stub_photo_speed_reset_count = 0U;
-static uint32_t stub_last_enter_count = 0U;
-static uint32_t stub_last_leave_count = 0U;
 static uint32_t stub_angle_update_count = 0U;
 static uint32_t stub_angle_init_count = 0U;
 static int32_t stub_last_angle_delta = 0;
@@ -183,18 +173,6 @@ static int32_t stub_last_angle_delta = 0;
 void photoelectric_sensor_update(void)
 {
     stub_photo_update_count++;
-}
-
-void photoelectric_speed_update(uint32_t enter_count, uint32_t leave_count)
-{
-    stub_photo_speed_update_count++;
-    stub_last_enter_count = enter_count;
-    stub_last_leave_count = leave_count;
-}
-
-void photoelectric_speed_reset(void)
-{
-    stub_photo_speed_reset_count++;
 }
 
 void turntable_angle_update_delta(int32_t count_delta)
@@ -305,9 +283,6 @@ int main(void)
     // 这 10 个 tick 里位置一直摆在 130：如果实现提前读了编码器，
     // g_turntable_encoder_position 就会提前变成 130。
     stub_encoder3_position = 130U;
-    g_photoelectric_enter_count = 7U;
-    g_photoelectric_leave_count = 6U;
-
     for (index = 0U; index < (TURNTABLE_ENCODER_SAMPLE_INTERVAL_TICKS - 1U);
          index++)
     {
@@ -317,7 +292,6 @@ int main(void)
     assert(g_turntable_encoder_position == 100U);   // 前 9 个 tick 没有采编码器
     assert(stub_angle_update_count == 0U);
     assert(stub_photo_update_count == 9U);          // 光电每 1 ms 都刷
-    assert(stub_photo_speed_update_count == 9U);
 
     // 第 10 个 tick 才采样。位置放回 100，让这次采样不污染后面的 M 法窗口。
     stub_encoder3_position = 100U;
@@ -327,11 +301,6 @@ int main(void)
     assert(g_turntable_sample_delta == 0);
     assert(stub_angle_update_count == 1U);          // 第 10 个 tick 才采
     assert(stub_photo_update_count == 10U);
-    assert(stub_photo_speed_update_count == 10U);
-
-    // ISR 每次都要把当前的 enter/leave 计数交给光电测速模块。
-    assert(stub_last_enter_count == 7U);
-    assert(stub_last_leave_count == 6U);
 
     // 上面的分频验证已经消耗了 1 次窗口采样，重新初始化回到干净的窗口状态。
     stub_timer_log_length = 0U;
@@ -339,7 +308,6 @@ int main(void)
     stub_timer_overflow_clear_count = 0U;
     stub_ack_group1_count = 0U;
     stub_photo_update_count = 0U;
-    stub_photo_speed_update_count = 0U;
     stub_angle_update_count = 0U;
     stub_encoder3_position = 100U;
     turntable_speed_init();
@@ -439,7 +407,6 @@ int main(void)
 
     // 光电每 1 ms 刷新一次，编码器 30 次采样各更新一次角度。
     assert(stub_photo_update_count == 300U);
-    assert(stub_photo_speed_update_count == 300U);
     assert(stub_angle_update_count == 30U);
     assert(stub_last_angle_delta == -5);
 
@@ -460,8 +427,7 @@ int main(void)
     assert(stub_disable_global_count == stub_enable_global_count);
     assert(turntable_speed_get_rpm_x100() == g_turntable_speed_rpm_x100);
 
-    // ---- TCP 收到 re 后，硬件位置、测速基准、软件角度和光电测速一起清零 ----
-    stub_photo_speed_reset_count = 0U;
+    // ---- TCP 收到 re 后，硬件位置、测速基准和软件角度一起清零 ----
     turntable_speed_reset_encoder3();
     assert(stub_encoder3_position == 0U);
     assert(stub_encoder3_set_position_count == 1U);
@@ -473,7 +439,6 @@ int main(void)
     assert(g_turntable_speed_rpm_x100 == 0);
     assert(g_turntable_speed_rpm == 0.0f);
     assert(stub_angle_init_count == 1U);
-    assert(stub_photo_speed_reset_count == 1U);
 
     puts("Turntable speed tests passed.");
     return 0;
