@@ -89,6 +89,8 @@ int8_t ctlwizchip(uint8_t control, void *argument)
 {
     assert(control == CW_INIT_WIZCHIP);
     assert(argument != 0);
+    assert(((uint8_t (*)[8])argument)[0][0] == 16U);
+    assert(((uint8_t (*)[8])argument)[1][0] == 16U);
     return 0;
 }
 
@@ -141,8 +143,8 @@ int8_t socket(uint8_t socket_number, uint8_t protocol,
 {
     assert(socket_number == PHOTOELECTRIC_TCP_SOCKET);
     assert(protocol == Sn_MR_TCP);
-    // 端口必须是 2000，且只能是非阻塞模式。
-    assert(port == PHOTOELECTRIC_TCP_PORT);
+    // 本电脑遥测使用 2000，且只能是非阻塞模式。
+    assert(port == 2000U);
     assert(flags == SF_IO_NONBLOCK);
     stub_socket_calls++;
     return SOCK_OK;
@@ -259,7 +261,9 @@ int main(void)
     // 编码器 29.29 rpm、检测到物品、当前 359.91 度。
     stub_socket_status = SOCK_ESTABLISHED;
     stub_socket_interrupt = Sn_IR_CON;
-    for (index = 0U; index < 99U; index++)
+    for (index = 0U;
+         index < (PHOTOELECTRIC_TCP_SEND_PERIOD_TICKS - 1U);
+         index++)
     {
         assert(photoelectric_tcp_server_poll(1U, 2929, 35991) == 0);
     }
@@ -279,7 +283,9 @@ int main(void)
     assert(stub_recv_calls == 2U);
 
     // 复位后的角度为 0.00，且重新等待完整的一秒发送周期。
-    for (index = 0U; index < 100U; index++)
+    for (index = 0U;
+         index < PHOTOELECTRIC_TCP_SEND_PERIOD_TICKS;
+         index++)
     {
         assert(photoelectric_tcp_server_poll(0U, 2929, 0) == 0);
     }
@@ -293,7 +299,9 @@ int main(void)
     assert(photoelectric_tcp_server_poll(0U, 0, 0) == 0);
     stub_socket_status = SOCK_ESTABLISHED;
     stub_send_result = 1;
-    for (index = 0U; index < 100U; index++)
+    for (index = 0U;
+         index < PHOTOELECTRIC_TCP_SEND_PERIOD_TICKS;
+         index++)
     {
         assert(photoelectric_tcp_server_poll(1U, 2929, 27000) == 0);
     }
@@ -319,7 +327,9 @@ int main(void)
     assert(photoelectric_tcp_server_poll(0U, 0, 0) == 0);
     stub_socket_status = SOCK_ESTABLISHED;
     stub_send_result = SOCK_BUSY;
-    for (index = 0U; index < 100U; index++)
+    for (index = 0U;
+         index < PHOTOELECTRIC_TCP_SEND_PERIOD_TICKS;
+         index++)
     {
         assert(photoelectric_tcp_server_poll(1U, 2929, 35991) == 0);
     }
@@ -344,7 +354,9 @@ int main(void)
     assert(photoelectric_tcp_server_poll(0U, 0, 0) == 0);
     stub_socket_status = SOCK_ESTABLISHED;
     stub_send_result = -1;
-    for (index = 0U; index < 100U; index++)
+    for (index = 0U;
+         index < PHOTOELECTRIC_TCP_SEND_PERIOD_TICKS;
+         index++)
     {
         assert(photoelectric_tcp_server_poll(1U, 2929, 35991) == 0);
     }

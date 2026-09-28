@@ -17,12 +17,16 @@ extern volatile uint16_t g_photoelectric_falling_edge; // 最近一次边沿为�
 extern volatile uint16_t g_photoelectric_rising_edge;  // 最近一次边沿为上升沿时保持 1
 extern volatile uint32_t g_photoelectric_enter_count;
 extern volatile uint32_t g_photoelectric_leave_count;
+extern volatile uint32_t g_photoelectric_count_reset_count;
 
 // 配置 IN0 为带上拉、同步采样的普通 GPIO 输入。
 void photoelectric_sensor_init(void);
 
 // 高到低表示物品进入并置 1；低到高表示物品离开并归 0。
 void photoelectric_sensor_update(void);
+
+// 请求在下一次 1 ms 采样中断内清零累计次数，避免主循环与中断竞争。
+void photoelectric_sensor_request_count_reset(void);
 
 #ifdef __cplusplus
 }

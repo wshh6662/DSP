@@ -64,7 +64,7 @@ MEMORY
 SECTIONS
 {
    codestart        : > BEGIN
-   .text            : >> RAMD0 | RAMD1 | RAMLS0 | RAMLS1 | RAMLS2 | RAMLS3 | RAMLS7
+   .text            : >> RAMD0 | RAMD1 | RAMLS0 | RAMLS1 | RAMLS2 | RAMLS3 | RAMLS7 | RAMLS4
    .cinit           : > RAMM0
    .switch          : > RAMM0
    .reset           : > RESET, TYPE = DSECT /* not used, */
@@ -74,7 +74,7 @@ SECTIONS
    .bss             : > RAMLS5
    .bss:output      : > RAMLS3
    .init_array      : > RAMM0
-   .const           : > RAMLS5 | RAMLS6
+   .const           : >> RAMLS5 | RAMLS6
    .data            : > RAMLS5
    .sysmem          : > RAMLS4
 #else

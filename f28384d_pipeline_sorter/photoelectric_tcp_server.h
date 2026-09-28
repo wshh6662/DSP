@@ -9,7 +9,7 @@ extern "C" {
 
 #define PHOTOELECTRIC_TCP_SOCKET             0U
 #define PHOTOELECTRIC_TCP_PORT               2000U
-#define PHOTOELECTRIC_TCP_SEND_PERIOD_TICKS  100U
+#define PHOTOELECTRIC_TCP_SEND_PERIOD_TICKS  1000U
 
 // CCS Watch 诊断变量：socket状态、网络初始化和累计发送帧数。
 extern volatile uint8_t g_photoelectric_socket_status;
@@ -24,7 +24,7 @@ extern volatile uint32_t g_photoelectric_reset_command_count;
 // 初始化 W5500，配置 DSP 地址为 192.168.1.20。
 int photoelectric_tcp_server_init(void);
 
-// 维护非阻塞 TCP Server，每 100 次主循环轮询（约 1 秒）发送一行
+// 维护非阻塞 TCP Server，每 1000 次主循环轮询（约 1 秒）发送一行
 // "enc_rpm=xx.xx,obj=n,angle=xxx.xx\r\n"，并接收 ASCII "re" 复位命令。
 // 完整识别到一次 re 返回 1，其余情况返回 0。
 // 三个测量值由调用方在主循环里先取好快照，本模块不直接读取正在被 Timer0 中断更新的变量。

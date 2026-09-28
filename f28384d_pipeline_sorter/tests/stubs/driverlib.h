@@ -7,8 +7,24 @@
 #define EQEP_INT_INDEX_EVNT_LATCH    0x0400U
 
 #define GPIO_DIR_MODE_IN             0U
+#define GPIO_DIR_MODE_OUT            1U
 #define GPIO_PIN_TYPE_PULLUP         1U
+#define GPIO_PIN_TYPE_STD            0U
 #define GPIO_QUAL_SYNC               0U
+#define GPIO_QUAL_ASYNC              3U
+
+#define SCIB_BASE                    0x00007210U
+#define GPIO_54_SCIB_TX              54U
+#define GPIO_55_SCIB_RX              55U
+#define GPIO_133_GPIO133             133U
+
+#define SCI_CONFIG_WLEN_8            0x0007U
+#define SCI_CONFIG_STOP_ONE          0x0000U
+#define SCI_CONFIG_PAR_NONE          0x0000U
+#define SCI_FIFO_RX0                 0U
+#define SCI_RXSTATUS_FRAMING         0x0010U
+#define SCI_RXSTATUS_BREAK           0x0020U
+#define SCI_RXSTATUS_ERROR           0x0080U
 
 // CPU Timer0（F2838x：CPUTIMER0_BASE = 0x00000C00，PIE 1.7 = INT_TIMER0）
 #define CPUTIMER0_BASE               0x00000C00U
@@ -30,8 +46,25 @@ void GPIO_setDirectionMode(uint32_t pin, uint32_t direction);
 void GPIO_setPadConfig(uint32_t pin, uint32_t pin_type);
 void GPIO_setQualificationMode(uint32_t pin, uint32_t qualification);
 void GPIO_writePin(uint32_t pin, uint32_t value);
+void GPIO_setPinConfig(uint32_t pin_config);
 void SPI_writeDataBlockingNonFIFO(uint32_t base, uint16_t data);
 uint16_t SPI_readDataBlockingNonFIFO(uint32_t base);
+
+void SCI_setConfig(uint32_t base, uint32_t lspclk_hz, uint32_t baud,
+                   uint32_t config);
+void SCI_enableFIFO(uint32_t base);
+void SCI_resetChannels(uint32_t base);
+void SCI_resetRxFIFO(uint32_t base);
+void SCI_resetTxFIFO(uint32_t base);
+void SCI_enableModule(uint32_t base);
+uint16_t SCI_getRxFIFOStatus(uint32_t base);
+uint16_t SCI_readCharNonBlocking(uint32_t base);
+void SCI_writeCharBlockingFIFO(uint32_t base, uint16_t data);
+bool SCI_isTransmitterBusy(uint32_t base);
+uint16_t SCI_getRxStatus(uint32_t base);
+bool SCI_getOverflowStatus(uint32_t base);
+void SCI_clearOverflowStatus(uint32_t base);
+void SCI_performSoftwareReset(uint32_t base);
 
 void CPUTimer_stopTimer(uint32_t base);
 void CPUTimer_setPreScaler(uint32_t base, uint16_t prescaler);

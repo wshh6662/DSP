@@ -36,7 +36,7 @@ extern "C" {
 #define MODBUS_EXCEPTION_ILLEGAL_ADDRESS    0x02U
 #define MODBUS_EXCEPTION_ILLEGAL_VALUE      0x03U
 
-// 处理一帧后回填给应用层的诊断信息，应用层再转存到 CCS Watch 可见的变量。
+// 处理结果供应用层判断写操作是否成功及其地址范围（例如计数清零线圈）。
 typedef struct {
     modbus_octet_t function;       // 请求中的功能码，未识别时也照原值记录
     modbus_octet_t exception_code; // 0 表示正常响应
@@ -49,6 +49,9 @@ typedef struct {
 // 必须在 main() 里、使用寄存器映射之前调用一次，否则首次上电会读到随机值。
 void ModbusTcp_ResetStorage(void);
 
+// 将已处理的一次性命令线圈恢复为 OFF，不清除其他线圈。
+void ModbusTcp_ClearCoil(uint16_t address);
+
 // 处理一帧完整的 Modbus TCP 请求并生成响应。
 //
 // request            指向完整请求帧的首字节
@@ -56,7 +59,7 @@ void ModbusTcp_ResetStorage(void);
 // detection_count    应用层当前检测数量，读 4x-5 / 4x-6 时动态取值
 // response           响应缓冲区
 // response_capacity  响应缓冲区容量，建议传 MODBUS_TCP_MAX_ADU_LENGTH
-// result             可传 0；非 0 时回填诊断信息
+// result             可传 0；非 0 时回填请求处理结果
 //
 // 返回响应字节数。返回 0 表示该帧必须整体丢弃（MBAP 无法解析，例如协议标识非 0、
 // 长度字段超出已收字节数）。格式合法但功能码不支持、地址或取值非法的请求一律返回

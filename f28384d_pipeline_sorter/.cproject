@@ -116,7 +116,7 @@
                         </toolChain>
                     </folderInfo>
                     <sourceEntries>
-                        <entry excluding="device/driverlib|device/device.c|device/f2838x_codestartbranch.asm|2838x_FLASH_lnk_cpu1.cmd|encoder_tcp_payload.c|modbus_tcp_server.c|tests" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name=""/>
+                        <entry excluding="device/driverlib|device/device.c|device/f2838x_codestartbranch.asm|2838x_FLASH_lnk_cpu1.cmd|encoder_tcp_payload.c|tests" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name=""/>
                     </sourceEntries>
                 </configuration>
             </storageModule>
@@ -237,7 +237,7 @@
                         </toolChain>
                     </folderInfo>
                     <sourceEntries>
-                        <entry excluding="device/driverlib|device/device.c|device/f2838x_codestartbranch.asm|2838x_RAM_lnk_cpu1.cmd|encoder_tcp_payload.c|modbus_tcp_server.c|tests" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name=""/>
+                        <entry excluding="device/driverlib|device/device.c|device/f2838x_codestartbranch.asm|2838x_RAM_lnk_cpu1.cmd|encoder_tcp_payload.c|tests" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name=""/>
                     </sourceEntries>
                 </configuration>
             </storageModule>

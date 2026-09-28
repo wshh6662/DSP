@@ -216,6 +216,14 @@ static void Modbus_SetCoil(uint16_t address, modbus_octet_t value)
     }
 }
 
+void ModbusTcp_ClearCoil(uint16_t address)
+{
+    if (address < MODBUS_COIL_COUNT)
+    {
+        Modbus_SetCoil(address, 0U);
+    }
+}
+
 // ------------------------------------------------------------ 功能码实现 --
 // 作用：FC01 读取线圈，按标准 Modbus 位序打包：每字节低位对应低地址线圈。
 static uint16_t Modbus_ReadCoils(const modbus_octet_t *request,

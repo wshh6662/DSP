@@ -113,6 +113,13 @@ int main(void)
     assert(g_photoelectric_rising_edge == 1U);
     assert(g_photoelectric_leave_count == 1U);
 
+    // HMI 的计数清零请求由 1 ms 更新函数执行，避免主循环与中断同时改 32 位计数。
+    photoelectric_sensor_request_count_reset();
+    photoelectric_sensor_update();
+    assert(g_photoelectric_enter_count == 0U);
+    assert(g_photoelectric_leave_count == 0U);
+    assert(g_photoelectric_count_reset_count == 1U);
+
     // ---- 测试 6：TCP 报文格式 ----
     // 只发送编码器转速、物品状态和当前角度；光电测速字段已经移除。
     assert_payload(1U, 2929, 35991, typical);

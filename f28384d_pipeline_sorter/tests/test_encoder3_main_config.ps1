@@ -4,8 +4,8 @@ $project_root = Split-Path -Parent $PSScriptRoot
 $main_source = Get-Content -Raw -LiteralPath `
     (Join-Path $project_root 'empty_driverlib_main.c')
 
-if ($main_source -notmatch 'encoder_watch_update_encoder3\(\);') {
-    throw 'The main loop must refresh encoder 3 Watch variables.'
+if ($main_source -match 'encoder_watch') {
+    throw 'The main loop must not depend on encoder Watch diagnostics.'
 }
 
 if ($main_source -notmatch 'photoelectric_sensor_init\(\);') {
@@ -48,8 +48,8 @@ if ($main_source -notmatch 'turntable_speed_reset_encoder3\(\);') {
     throw 'The re command must reset eQEP3, speed state and angle state together.'
 }
 
-if ($main_source -notmatch 'DEVICE_DELAY_US\(10000U\);') {
-    throw 'The combined Watch and photoelectric loop delay must be 10000 us.'
+if ($main_source -notmatch 'DEVICE_DELAY_US\(1000U\);') {
+    throw 'The main loop must poll RS485 about every 1000 us.'
 }
 
 if ($main_source -notmatch '(?m)^\s*EINT;\s*$') {
