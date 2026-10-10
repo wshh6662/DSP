@@ -10,6 +10,8 @@
 #define GPIO_DIR_MODE_OUT            1U
 #define GPIO_PIN_TYPE_PULLUP         1U
 #define GPIO_PIN_TYPE_STD            0U
+#define GPIO_PIN_TYPE_OD             0x0004U
+#define GPIO_0_GPIO0                0x00060000U
 #define GPIO_QUAL_SYNC               0U
 #define GPIO_QUAL_ASYNC              3U
 

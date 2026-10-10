@@ -10,6 +10,7 @@ New-Item -ItemType Directory -Force $output_directory | Out-Null
     -I (Join-Path $PSScriptRoot 'stubs') `
     -I $project_root `
     (Join-Path $PSScriptRoot 'test_photoelectric_tcp_server.c') `
+    (Join-Path $project_root 'camera_result.c') `
     (Join-Path $project_root 'photoelectric_tcp_server.c') `
     (Join-Path $project_root 'photoelectric_tcp_payload.c') `
     -o $test_program

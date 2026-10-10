@@ -1,11 +1,11 @@
 //#############################################################################
 // FILE:   photoelectric_tcp_payload.c
-// TITLE:  编码器转速 + 光电检测 + 当前角度 TCP 文本生成
+// TITLE:  编码器转速 + 当前角度 + 光电状态 TCP 文本生成
 //#############################################################################
 //
 // 发送格式（每约 1 秒一行）：
-//   enc_rpm=29.29,obj=1,angle=359.91\r\n
-//   enc_rpm=-29.29,obj=0,angle=0.00\r\n
+//   enc_rpm=29.29,angle=359.91,photo=1\r\n
+//   enc_rpm=-29.29,angle=0.00,photo=0\r\n
 //
 // 编码器转速和角度都是 0.01 定标的定点整数，手工转换成 ASCII，
 // 不用 sprintf 浮点格式化：
@@ -25,6 +25,7 @@ typedef struct
     uint16_t overflow;
 } payload_writer_t;
 
+// 追加一个字符；容量不足时锁定溢出标志，后续写入不再访问缓冲区。
 static void payload_write_char(payload_writer_t *writer, char value)
 {
     if (writer->overflow != 0U)
@@ -42,6 +43,7 @@ static void payload_write_char(payload_writer_t *writer, char value)
     writer->length++;
 }
 
+// 追加字符串正文，结束符不进入发送报文。
 static void payload_write_text(payload_writer_t *writer, const char *text)
 {
     while (*text != '\0')
@@ -51,7 +53,7 @@ static void payload_write_text(payload_writer_t *writer, const char *text)
     }
 }
 
-// 把 0.01 rpm 定点数写成 "整数.两位小数"，带前导负号。
+// 把转速或角度的百分之一单位定点数写成 "整数.两位小数"，带前导负号。
 static void payload_write_fixed_x100(payload_writer_t *writer,
                                      int32_t value_x100)
 {
@@ -96,10 +98,11 @@ static void payload_write_fixed_x100(payload_writer_t *writer,
     payload_write_char(writer, (char)('0' + (char)(fraction % 10U)));
 }
 
+// 拼接一行遥测文本；成功返回有效长度，空指针或容量不足返回 0。
 uint16_t photoelectric_tcp_build_payload(
-    uint16_t detected,
     int32_t encoder_rpm_x100,
     int32_t angle_degrees_x100,
+    uint16_t detected,
     photoelectric_octet_t *payload,
     uint16_t payload_capacity)
 {
@@ -118,17 +121,18 @@ uint16_t photoelectric_tcp_build_payload(
     payload_write_text(&writer, "enc_rpm=");
     payload_write_fixed_x100(&writer, encoder_rpm_x100);
 
-    payload_write_text(&writer, ",obj=");
-    payload_write_char(&writer, (detected != 0U) ? '1' : '0');
-
     payload_write_text(&writer, ",angle=");
     payload_write_fixed_x100(&writer, angle_degrees_x100);
+
+    payload_write_text(&writer, ",photo=");
+    payload_write_char(&writer, (detected != 0U) ? '1' : '0');
 
     payload_write_text(&writer, "\r\n");
 
     return (writer.overflow != 0U) ? 0U : writer.length;
 }
 
+// 周期必须非零；调用方负责在发送到期后重新开始计数。
 uint16_t photoelectric_tcp_is_send_due(uint16_t elapsed_ticks,
                                        uint16_t period_ticks)
 {

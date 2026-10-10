@@ -13,17 +13,17 @@
 extern "C" {
 #endif
 
-// 编码器 3：1000 P/R，A/B 两相四倍频后每转 4000 个计数。
-// SysConfig 把 QPOSCNT 配成 EQEP_POSITION_RESET_MAX_POS，计到 3999 后回到 0。
-#define TURNTABLE_SPEED_COUNTS_PER_REVOLUTION   4000L
-#define TURNTABLE_SPEED_COUNTS_ROLLOVER         4000L
-#define TURNTABLE_SPEED_COUNTS_ROLLOVER_HALF    2000L
+// 编码器 3：2000 P/R，A/B 两相四倍频后每转 8000 个计数，无 Z 相。
+// SysConfig 把 QPOSCNT 配成 EQEP_POSITION_RESET_MAX_POS，计到 7999 后回到 0。
+#define TURNTABLE_SPEED_COUNTS_PER_REVOLUTION   8000L
+#define TURNTABLE_SPEED_COUNTS_ROLLOVER         8000L
+#define TURNTABLE_SPEED_COUNTS_ROLLOVER_HALF    4000L
 
 // CPU Timer0 时基：1 ms 一个 tick（1000 Hz）。
 // 1 ms 时基确保光电传感器的上升沿和下降沿能及时采样。
 #define TURNTABLE_TIMER_TICK_FREQUENCY_HZ       1000U
 
-// 编码器仍然按原来的 10 ms 采样：每 10 个 1 ms tick 才读一次 eQEP3，
+// 编码器每 1 ms 读取用于相机触发；每 10 个 tick 才计入一次测速采样，
 // 连续 5 次采样仍然组成 50 ms 的 M 法测速窗口，精度与窗口长度都没有变化。
 #define TURNTABLE_ENCODER_SAMPLE_INTERVAL_TICKS 10U
 #define TURNTABLE_ENCODER_SAMPLE_FREQUENCY_HZ   100U
@@ -37,8 +37,8 @@ extern "C" {
 #endif
 
 // CCS Watch 变量，全部在 turntable_speed.c 顶部定义。
-extern volatile uint32_t g_turntable_encoder_position;       // 当前读取的编码器 3 位置，范围 0～3999
-extern volatile uint32_t g_turntable_previous_position;      // 上一次 10 ms 采样的位置，范围 0～3999
+extern volatile uint32_t g_turntable_encoder_position;       // 当前读取的编码器 3 位置，范围 0～7999
+extern volatile uint32_t g_turntable_previous_position;      // 上一次 10 ms 采样的位置，范围 0～7999
 extern volatile int32_t  g_turntable_sample_delta;           // 最近一次 10 ms 采样的带方向计数差
 extern volatile int32_t  g_turntable_accumulated_count;      // 当前 50 ms 窗口内已累计的计数增量
 extern volatile int32_t  g_turntable_speed_count_m;          // 最近一个 50 ms 测速窗口内的 M 值
@@ -58,15 +58,15 @@ int32_t turntable_speed_get_rpm_x100(void);
 // 把 eQEP3 位置、测速基准和软件角度同步清零，供 TCP "re" 命令调用。
 void turntable_speed_reset_encoder3(void);
 
-// Timer0 中断服务函数：每 1 ms 刷新光电边沿，
-// 每 10 个 tick 才采一次编码器，更新 M 法转速和当前角度。
+// Timer0 每 1 ms 读取编码器以定位相机触发点并刷新光电边沿；
+// 每 10 个 tick 才把该位置用于 M 法测速和当前角度计算。
 TURNTABLE_SPEED_ISR void turntable_speed_timer_isr(void);
 
-// 把本次位置与上次位置之差换算成带方向的计数增量，并处理 0～3999 的回绕。
+// 把本次位置与上次位置之差换算成带方向的计数增量，并处理 0～7999 的回绕。
 int32_t turntable_speed_wrap_delta(uint32_t current_position,
                                    uint32_t previous_position);
 
-// 把 50 ms 窗口内的 M 值换算成 0.01 rpm 定点转速：M × 30。
+// 把 50 ms 窗口内的 M 值换算成 0.01 rpm 定点转速：M × 15。
 int32_t turntable_speed_rpm_x100_from_count(int32_t count_m);
 
 #ifdef __cplusplus

@@ -92,6 +92,7 @@ uint16_t EncoderTcp_BuildDiagnosticPayload(uint32_t position,
     return payload_length;
 }
 
+// 判断轮询计数是否达到非零发送周期，调用方负责重置计数。
 uint16_t EncoderTcp_IsSendDue(uint16_t elapsed_ticks,
                               uint16_t period_ticks)
 {

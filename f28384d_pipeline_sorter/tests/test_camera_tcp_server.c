@@ -65,7 +65,7 @@ int8_t socket(uint8_t socket_number, uint8_t protocol,
 {
     assert(socket_number == CAMERA_TCP_SOCKET);
     assert(protocol == Sn_MR_TCP);
-    assert(port == CAMERA_TCP_PORT);
+    assert(port == 2001U);
     assert(flag == SF_IO_NONBLOCK);
     stub_socket_calls++;
     return (int8_t)CAMERA_TCP_SOCKET;
@@ -105,6 +105,15 @@ int32_t recv(uint8_t socket_number, uint8_t *buffer, uint16_t length)
     memcpy(buffer, &stub_received_data[stub_received_offset], receive_length);
     stub_received_offset = (uint16_t)(stub_received_offset + receive_length);
     return (int32_t)receive_length;
+}
+
+int32_t send(uint8_t socket_number, uint8_t *buffer, uint16_t length)
+{
+    (void)socket_number;
+    (void)buffer;
+    (void)length;
+    assert(0 && "camera receiver must not send hi");
+    return -1;
 }
 
 int main(void)
