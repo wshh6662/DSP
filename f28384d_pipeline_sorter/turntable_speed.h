@@ -55,6 +55,9 @@ void turntable_speed_init(void);
 // 内部在极短临界区内复制 ISR 正在更新的数值，避免 32 位数据被读成半新半旧。
 int32_t turntable_speed_get_rpm_x100(void);
 
+// 原子读取1 ms时基；编码器清零不重置此计数。
+uint32_t turntable_speed_get_tick_count(void);
+
 // 把 eQEP3 位置、测速基准和软件角度同步清零，供 TCP "re" 命令调用。
 void turntable_speed_reset_encoder3(void);
 

@@ -7,6 +7,7 @@
 
 volatile uint16_t g_camera_inspection_result = CAMERA_INSPECTION_NONE;
 volatile uint32_t g_camera_inspection_result_count = 0U;
+volatile uint32_t g_camera_inspection_bad_count = 0U;
 volatile uint32_t g_camera_inspection_invalid_count = 0U;
 
 static uint16_t camera_result_state = 0U;
@@ -16,6 +17,7 @@ void camera_result_init(void)
 {
     g_camera_inspection_result = CAMERA_INSPECTION_NONE;
     g_camera_inspection_result_count = 0U;
+    g_camera_inspection_bad_count = 0U;
     g_camera_inspection_invalid_count = 0U;
     camera_result_state = 0U;
     camera_result_candidate = CAMERA_INSPECTION_NONE;
@@ -68,6 +70,10 @@ void camera_result_feed_byte(camera_result_octet_t value)
     {
         g_camera_inspection_result = camera_result_candidate;
         g_camera_inspection_result_count++;
+        if (camera_result_candidate == CAMERA_INSPECTION_BAD)
+        {
+            g_camera_inspection_bad_count++;
+        }
     }
     camera_result_reset_partial_frame();
 }

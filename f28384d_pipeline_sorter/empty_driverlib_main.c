@@ -24,6 +24,63 @@
 
 #define NETWORK_RETRY_TICKS    1000U // 约 1 ms 一轮，1000 轮后重试网络初始化。
 
+#define CAMERA_BUZZER_DURATION_TICKS 500U
+
+volatile uint16_t g_camera_buzzer_active = 0U;
+
+static void camera_result_output_init(void)
+{
+    // K1/K4隔离源型输出：GPIO低导通，高关闭。先锁存关闭值再使能输出。
+    GPIO_setPinConfig(GPIO_1_GPIO1);
+    GPIO_setPinConfig(GPIO_4_GPIO4);
+    GPIO_writePin(1U, 1U);
+    GPIO_writePin(4U, 1U);
+    GPIO_setPadConfig(1U, GPIO_PIN_TYPE_OD);
+    GPIO_setPadConfig(4U, GPIO_PIN_TYPE_OD);
+    GPIO_setDirectionMode(1U, GPIO_DIR_MODE_OUT);
+    GPIO_setDirectionMode(4U, GPIO_DIR_MODE_OUT);
+}
+
+static void camera_result_output_poll(void)
+{
+    static uint32_t applied_result_count = 0U;
+    static uint32_t applied_bad_count = 0U;
+    static uint32_t buzzer_start_tick = 0U;
+    uint32_t result_count = g_camera_inspection_result_count;
+    uint32_t bad_count = g_camera_inspection_bad_count;
+    uint32_t now = turntable_speed_get_tick_count();
+    uint16_t result = g_camera_inspection_result;
+
+    // 每条新不良重新计时；同批次后续良品不能取消蜂鸣器脉冲。
+    if (bad_count != applied_bad_count)
+    {
+        applied_bad_count = bad_count;
+        buzzer_start_tick = now;
+        g_camera_buzzer_active = 1U;
+        GPIO_writePin(1U, 0U); // K1送+24V：蜂鸣器响。
+    }
+    // 无符号减法兼容时基回绕；即使无新报文也检查关闭期限。
+    if ((g_camera_buzzer_active != 0U) &&
+        ((uint32_t)(now - buzzer_start_tick) >= CAMERA_BUZZER_DURATION_TICKS))
+    {
+        GPIO_writePin(1U, 1U); // K1开路：须验证设备输入能可靠识别为静音。
+        g_camera_buzzer_active = 0U;
+    }
+    if (result_count != applied_result_count)
+    {
+        applied_result_count = result_count;
+        if (result == CAMERA_INSPECTION_GOOD)
+        {
+            GPIO_writePin(4U, 0U); // K4送+24V：目标为绿灯。
+        }
+        else if (result == CAMERA_INSPECTION_BAD)
+        {
+            GPIO_writePin(4U, 1U); // K4开路：目标为红灯，须验证设备下拉。
+        }
+    }
+    // 最近结果保持到下一条有效帧；TCP重连只清解析半帧，不改变当前输出。
+}
+
 void main(void)
 {
     int network_ready; // 网络初始化返回码：0 表示成功。
@@ -56,6 +113,7 @@ void main(void)
     // 初始化相机触发队列和 K0（GPIO0）输出，上电默认关闭。
     camera_trigger_init();
     camera_result_init();
+    camera_result_output_init();
 
     // 建立当前角度的零点。
     turntable_angle_init();
@@ -110,6 +168,9 @@ void main(void)
                 network_ready = photoelectric_tcp_server_init();
             }
         }
+
+        // 本轮TCP接收完成后应用最新相机结果；不改变K0拍照输出。
+        camera_result_output_poll();
 
         // 1 ms 轮询可及时清空 16 字节 SCI FIFO；测量精度仍由 Timer0 中断保证。
         DEVICE_DELAY_US(1000U);

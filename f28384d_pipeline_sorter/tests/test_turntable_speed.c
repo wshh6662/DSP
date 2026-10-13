@@ -152,15 +152,20 @@ void Interrupt_clearACKGroup(uint16_t ack_group)
     stub_ack_group1_count++;
 }
 
+static bool stub_interrupts_disabled = false;
+
 bool Interrupt_disableGlobal(void)
 {
+    bool previous = stub_interrupts_disabled;
     stub_disable_global_count++;
-    return false;
+    stub_interrupts_disabled = true;
+    return previous;
 }
 
 bool Interrupt_enableGlobal(void)
 {
     stub_enable_global_count++;
+    stub_interrupts_disabled = false;
     return false;
 }
 
@@ -469,6 +474,17 @@ int main(void)
     assert(stub_disable_global_count == stub_enable_global_count);
     assert(turntable_speed_get_rpm_x100() == g_turntable_speed_rpm_x100);
 
+    assert(turntable_speed_get_tick_count() == 300U);
+    assert(!stub_interrupts_disabled);
+    {
+        uint32_t enables = stub_enable_global_count;
+        stub_interrupts_disabled = true;
+        assert(turntable_speed_get_tick_count() == 300U);
+        assert(stub_interrupts_disabled);
+        assert(stub_enable_global_count == enables);
+        stub_interrupts_disabled = false;
+    }
+
     // ---- TCP 收到 re 后，硬件位置、测速基准和软件角度一起清零 ----
     turntable_speed_reset_encoder3();
     assert(stub_encoder3_position == 0U);
@@ -481,6 +497,7 @@ int main(void)
     assert(g_turntable_speed_rpm_x100 == 0);
     assert(g_turntable_speed_rpm == 0.0f);
     assert(stub_angle_init_count == 1U);
+    assert(turntable_speed_get_tick_count() == 300U);
 
     puts("Turntable speed tests passed.");
     return 0;

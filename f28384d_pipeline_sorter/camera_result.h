@@ -20,6 +20,7 @@ typedef uint8_t camera_result_octet_t;
 
 extern volatile uint16_t g_camera_inspection_result;       // 最近一次完整结果
 extern volatile uint32_t g_camera_inspection_result_count; // 完整结果累计数
+extern volatile uint32_t g_camera_inspection_bad_count;    // 完整不良累计数，避免同批良品覆盖报警
 extern volatile uint32_t g_camera_inspection_invalid_count; // 非 1/2 的结果数
 
 void camera_result_init(void);

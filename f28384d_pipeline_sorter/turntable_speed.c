@@ -199,6 +199,20 @@ int32_t turntable_speed_get_rpm_x100(void)
     return snapshot;
 }
 
+uint32_t turntable_speed_get_tick_count(void)
+{
+    uint32_t snapshot;
+    bool interrupts_were_disabled;
+
+    interrupts_were_disabled = Interrupt_disableGlobal();
+    snapshot = g_turntable_timer_interrupt_count;
+    if (interrupts_were_disabled == false)
+    {
+        (void)Interrupt_enableGlobal();
+    }
+    return snapshot;
+}
+
 void turntable_speed_reset_encoder3(void)
 {
     bool interrupts_were_disabled;

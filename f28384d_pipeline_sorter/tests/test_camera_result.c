@@ -21,6 +21,7 @@ int main(void)
     feed("c1,");
     assert(g_camera_inspection_result == CAMERA_INSPECTION_GOOD);
     assert(g_camera_inspection_result_count == 1U);
+    assert(g_camera_inspection_bad_count == 0U);
 
     feed("noise,tcmc2,");
     assert(g_camera_inspection_result == CAMERA_INSPECTION_BAD);
@@ -36,6 +37,12 @@ int main(void)
     assert(g_camera_inspection_result == CAMERA_INSPECTION_GOOD);
     assert(g_camera_inspection_result_count == 3U);
     assert(g_camera_inspection_invalid_count == 1U);
+    assert(g_camera_inspection_bad_count == 1U);
+    feed("tcmc2,tcmc1,");
+    assert(g_camera_inspection_result == CAMERA_INSPECTION_GOOD);
+    assert(g_camera_inspection_bad_count == 2U);
+    camera_result_init();
+    assert(g_camera_inspection_bad_count == 0U);
 
     puts("camera result tests passed");
     return 0;
