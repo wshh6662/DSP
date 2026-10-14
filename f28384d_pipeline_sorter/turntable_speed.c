@@ -132,7 +132,7 @@ TURNTABLE_SPEED_ISR void turntable_speed_timer_isr(void)
     camera_trigger_tick_1ms();
     if (photoelectric_sensor_update() != 0U)
     {
-        camera_trigger_on_bottle(position);
+        camera_trigger_on_bottle(position, g_turntable_speed_rpm_x100);
     }
     camera_trigger_update_position(position);
 

@@ -53,7 +53,7 @@ static void test_k0_starts_off_and_pulses_at_115_degrees(void)
     assert(last_write_pin == 0U);
     assert(last_write_value == 1U);
 
-    camera_trigger_on_bottle(300U);
+    camera_trigger_on_bottle(300U, 0);
     camera_trigger_update_position(2855U);
     assert(last_write_value == 1U);
     camera_trigger_update_position(2856U);
@@ -79,16 +79,19 @@ static void test_simultaneous_bottles_produce_separate_pulses(void)
     camera_trigger_init();
     for (index = 0U; index < CAMERA_TRIGGER_MAX_PENDING; index++)
     {
-        camera_trigger_on_bottle(0U);
+        camera_trigger_on_bottle(0U, 0);
     }
     camera_trigger_update_position(2556U);
     assert(g_camera_trigger_count == CAMERA_TRIGGER_MAX_PENDING);
+    assert(g_camera_trigger_pulse_queue_count == CAMERA_TRIGGER_MAX_PENDING - 1U);
+    assert(g_camera_trigger_pulse_queue_depth == CAMERA_TRIGGER_MAX_PENDING - 1U);
     for (index = 0U; index < CAMERA_TRIGGER_MAX_PENDING * 7U; index++)
     {
         camera_trigger_tick_1ms();
     }
     assert(pulse_start_count - previous_pulses == CAMERA_TRIGGER_MAX_PENDING);
     assert(g_camera_trigger_output_active == 0U);
+    assert(g_camera_trigger_pulse_queue_depth == 0U);
 }
 
 int main(void)

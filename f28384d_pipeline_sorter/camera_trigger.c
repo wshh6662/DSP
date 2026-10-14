@@ -13,17 +13,48 @@ typedef struct
 {
     uint32_t previous_position;
     int32_t travel_count;
+    uint16_t target_count;
     uint16_t active;
 } camera_trigger_bottle_t;
 
 volatile uint32_t g_camera_trigger_count = 0U;
 volatile uint32_t g_camera_trigger_overflow_count = 0U;
 volatile uint16_t g_camera_trigger_output_active = 0U;
+volatile uint16_t g_camera_trigger_base_counts = CAMERA_TRIGGER_DISTANCE_COUNTS;
+volatile uint16_t g_camera_trigger_delay_ms = 0U;
+volatile uint16_t g_camera_trigger_actual_target_counts = CAMERA_TRIGGER_DISTANCE_COUNTS;
+volatile uint16_t g_camera_trigger_pulse_queue_depth = 0U;
+volatile uint32_t g_camera_trigger_pulse_queue_count = 0U;
+volatile uint32_t g_camera_trigger_compensation_saturated_count = 0U;
 
 static camera_trigger_bottle_t camera_trigger_bottles[CAMERA_TRIGGER_MAX_PENDING];
 static uint16_t camera_trigger_pulse_ticks = 0U;
 static uint16_t camera_trigger_gap_ticks = 0U;
-static uint16_t camera_trigger_queued_pulses = 0U;
+
+static uint16_t camera_trigger_target_from_speed(int32_t speed_rpm_x100)
+{
+    int64_t forward_rpm_x100 =
+        (int64_t)speed_rpm_x100 * CAMERA_TRIGGER_FORWARD_DIRECTION;
+    uint16_t base = g_camera_trigger_base_counts;
+    uint16_t delay_ms = g_camera_trigger_delay_ms;
+    uint64_t advance_counts;
+
+    if ((forward_rpm_x100 <= 0) || (delay_ms == 0U))
+    {
+        return base;
+    }
+
+    // rpm_x100 * 8000 * delay_ms / (60000 * 100), rounded to nearest count.
+    advance_counts = ((uint64_t)forward_rpm_x100 *
+        CAMERA_TRIGGER_COUNTS_PER_REVOLUTION * delay_ms + 3000000ULL) /
+        6000000ULL;
+    if (advance_counts >= base)
+    {
+        g_camera_trigger_compensation_saturated_count++;
+        return 0U;
+    }
+    return (uint16_t)(base - advance_counts);
+}
 
 static void camera_trigger_write_output(uint16_t active)
 {
@@ -71,17 +102,23 @@ void camera_trigger_init(void)
     {
         camera_trigger_bottles[index].previous_position = 0U;
         camera_trigger_bottles[index].travel_count = 0L;
+        camera_trigger_bottles[index].target_count = CAMERA_TRIGGER_DISTANCE_COUNTS;
         camera_trigger_bottles[index].active = 0U;
     }
     g_camera_trigger_count = 0U;
     g_camera_trigger_overflow_count = 0U;
+    g_camera_trigger_base_counts = CAMERA_TRIGGER_DISTANCE_COUNTS;
+    g_camera_trigger_delay_ms = 0U;
+    g_camera_trigger_actual_target_counts = CAMERA_TRIGGER_DISTANCE_COUNTS;
+    g_camera_trigger_pulse_queue_depth = 0U;
+    g_camera_trigger_pulse_queue_count = 0U;
+    g_camera_trigger_compensation_saturated_count = 0U;
     camera_trigger_pulse_ticks = 0U;
     camera_trigger_gap_ticks = 0U;
-    camera_trigger_queued_pulses = 0U;
     camera_trigger_write_output(0U);
 }
 
-void camera_trigger_on_bottle(uint32_t encoder_position)
+void camera_trigger_on_bottle(uint32_t encoder_position, int32_t speed_rpm_x100)
 {
     uint16_t index;
 
@@ -91,6 +128,10 @@ void camera_trigger_on_bottle(uint32_t encoder_position)
         {
             camera_trigger_bottles[index].previous_position = encoder_position;
             camera_trigger_bottles[index].travel_count = 0L;
+            camera_trigger_bottles[index].target_count =
+                camera_trigger_target_from_speed(speed_rpm_x100);
+            g_camera_trigger_actual_target_counts =
+                camera_trigger_bottles[index].target_count;
             camera_trigger_bottles[index].active = 1U;
             return;
         }
@@ -116,7 +157,7 @@ void camera_trigger_update_position(uint32_t encoder_position)
             camera_trigger_wrap_delta(encoder_position, bottle->previous_position);
         bottle->previous_position = encoder_position;
 
-        if (bottle->travel_count >= CAMERA_TRIGGER_DISTANCE_COUNTS)
+        if (bottle->travel_count >= bottle->target_count)
         {
             bottle->active = 0U;
             g_camera_trigger_count++;
@@ -127,7 +168,8 @@ void camera_trigger_update_position(uint32_t encoder_position)
             }
             else
             {
-                camera_trigger_queued_pulses++;
+                g_camera_trigger_pulse_queue_depth++;
+                g_camera_trigger_pulse_queue_count++;
             }
         }
     }
@@ -148,9 +190,9 @@ void camera_trigger_tick_1ms(void)
     {
         camera_trigger_gap_ticks--;
     }
-    else if (camera_trigger_queued_pulses != 0U)
+    else if (g_camera_trigger_pulse_queue_depth != 0U)
     {
-        camera_trigger_queued_pulses--;
+        g_camera_trigger_pulse_queue_depth--;
         camera_trigger_start_pulse();
     }
 }
@@ -165,6 +207,6 @@ void camera_trigger_reset_pending(void)
     }
     camera_trigger_pulse_ticks = 0U;
     camera_trigger_gap_ticks = 0U;
-    camera_trigger_queued_pulses = 0U;
+    g_camera_trigger_pulse_queue_depth = 0U;
     camera_trigger_write_output(0U);
 }

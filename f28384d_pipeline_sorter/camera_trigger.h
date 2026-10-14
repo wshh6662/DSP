@@ -1,6 +1,6 @@
 //#############################################################################
 // FILE:   camera_trigger.h
-// TITLE:  光电入瓶后正向行进115度触发相机
+// TITLE:  光电入瓶后按标定位置和转速补偿触发相机
 //#############################################################################
 
 #ifndef CAMERA_TRIGGER_H
@@ -30,17 +30,23 @@
 #if (CAMERA_TRIGGER_FORWARD_DIRECTION != 1L) && (CAMERA_TRIGGER_FORWARD_DIRECTION != -1L)
 #error CAMERA_TRIGGER_FORWARD_DIRECTION must be 1 or -1
 #endif
-// 从光电进入沿锁存位置，前进115度：8000 * 115 / 360，四舍五入为2556。
-#define CAMERA_TRIGGER_DISTANCE_COUNTS      2556L
+// 默认从光电进入沿前进115度：8000 * 115 / 360，四舍五入为2556。
+#define CAMERA_TRIGGER_DISTANCE_COUNTS      2556U
 #define CAMERA_TRIGGER_PULSE_TICKS           5U
 #define CAMERA_TRIGGER_MAX_PENDING           8U
 
 extern volatile uint32_t g_camera_trigger_count;          // 已到达拍照位置的瓶子数量
 extern volatile uint32_t g_camera_trigger_overflow_count; // 队列满时丢弃的入瓶事件
 extern volatile uint16_t g_camera_trigger_output_active;  // 逻辑触发脉冲当前状态
+extern volatile uint16_t g_camera_trigger_base_counts;     // CCS Watch 可调：低速标定的光电到拍照位移
+extern volatile uint16_t g_camera_trigger_delay_ms;        // CCS Watch 可调：补偿延迟，默认 0 ms
+extern volatile uint16_t g_camera_trigger_actual_target_counts; // 最近入瓶的锁定目标；每瓶各自保存
+extern volatile uint16_t g_camera_trigger_pulse_queue_depth; // 当前等待 K0 的脉冲数
+extern volatile uint32_t g_camera_trigger_pulse_queue_count; // K0 忙时累计排队次数
+extern volatile uint32_t g_camera_trigger_compensation_saturated_count; // 所需提前量超过基准的次数
 
 void camera_trigger_init(void);
-void camera_trigger_on_bottle(uint32_t encoder_position);
+void camera_trigger_on_bottle(uint32_t encoder_position, int32_t speed_rpm_x100);
 void camera_trigger_update_position(uint32_t encoder_position);
 void camera_trigger_tick_1ms(void);
 void camera_trigger_reset_pending(void);

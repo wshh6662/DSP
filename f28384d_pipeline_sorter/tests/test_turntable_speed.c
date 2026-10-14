@@ -176,6 +176,7 @@ static uint32_t stub_camera_bottle_count = 0U;
 static uint32_t stub_camera_position_count = 0U;
 static uint32_t stub_camera_tick_count = 0U;
 static uint32_t stub_camera_last_position = 0U;
+static int32_t stub_camera_last_speed_rpm_x100 = 0;
 static uint32_t stub_angle_update_count = 0U;
 static uint32_t stub_angle_init_count = 0U;
 static int32_t stub_last_angle_delta = 0;
@@ -191,10 +192,11 @@ uint16_t photoelectric_sensor_update(void)
     return 0U;
 }
 
-void camera_trigger_on_bottle(uint32_t position)
+void camera_trigger_on_bottle(uint32_t position, int32_t speed_rpm_x100)
 {
     stub_camera_bottle_count++;
     stub_camera_last_position = position;
+    stub_camera_last_speed_rpm_x100 = speed_rpm_x100;
 }
 
 void camera_trigger_update_position(uint32_t position)
@@ -344,9 +346,11 @@ int main(void)
     // 新瓶入瓶沿当场锁存 eQEP 位置，不等待下一次 10 ms 测速采样。
     stub_photo_enter = 1U;
     stub_encoder3_position = 125U;
+    g_turntable_speed_rpm_x100 = 3000;
     run_timer_tick();
     assert(stub_camera_bottle_count == 1U);
     assert(stub_camera_last_position == 125U);
+    assert(stub_camera_last_speed_rpm_x100 == 3000);
     assert(stub_camera_position_count == 11U);
 
     // 上面的分频验证已经消耗了 1 次窗口采样，重新初始化回到干净的窗口状态。
