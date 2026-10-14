@@ -4,6 +4,7 @@
 #define MODBUS_RTU_CRC_LENGTH     2U
 #define MODBUS_TCP_MBAP_LENGTH    6U
 
+// 先清除处理结果，避免被丢弃的帧沿用上一次写请求的信息。
 static void ModbusRtu_ClearResult(modbus_tcp_result_t *result)
 {
     if (result != 0)
@@ -15,6 +16,7 @@ static void ModbusRtu_ClearResult(modbus_tcp_result_t *result)
     }
 }
 
+// CRC16/Modbus：初值 0xFFFF，逐位右移，使用反向多项式 0xA001。
 uint16_t ModbusRtu_CalculateCrc(const modbus_octet_t *data,
                                 uint16_t length)
 {
@@ -42,6 +44,7 @@ uint16_t ModbusRtu_CalculateCrc(const modbus_octet_t *data,
     return crc;
 }
 
+// RTU 负责站号与 CRC；功能码和寄存器操作复用 Modbus TCP 的协议处理函数。
 uint16_t ModbusRtu_ProcessRequest(const modbus_octet_t *request,
                                   uint16_t request_length,
                                   uint16_t slave_address,
@@ -72,12 +75,14 @@ uint16_t ModbusRtu_ProcessRequest(const modbus_octet_t *request,
         return 0U;
     }
 
+    // 仅接受本站请求或地址 0 的广播请求。
     request_address = (uint16_t)request[0];
     if ((request_address != 0U) && (request_address != slave_address))
     {
         return 0U;
     }
 
+    // RTU 帧尾 CRC 低字节在前，计算范围不包含 CRC 自身。
     received_crc = (uint16_t)request[request_length - 2U] |
                    (uint16_t)((uint16_t)request[request_length - 1U] << 8U);
     calculated_crc = ModbusRtu_CalculateCrc(
@@ -94,6 +99,7 @@ uint16_t ModbusRtu_ProcessRequest(const modbus_octet_t *request,
                                     MODBUS_RTU_ADDRESS_LENGTH +
                                     pdu_length);
 
+    // 在内存中补 MBAP 头以复用共用处理逻辑，不通过网口发送这份临时请求。
     tcp_request[0] = 0U;
     tcp_request[1] = 0U;
     tcp_request[2] = 0U;
@@ -134,6 +140,7 @@ uint16_t ModbusRtu_ProcessRequest(const modbus_octet_t *request,
         return 0U;
     }
 
+    // 去掉临时响应的 MBAP 头，保留站号和 PDU，再补上 RTU CRC。
     for (index = MODBUS_TCP_MBAP_LENGTH;
          index < tcp_response_length;
          index++)

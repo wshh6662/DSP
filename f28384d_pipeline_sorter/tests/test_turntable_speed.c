@@ -152,27 +152,64 @@ void Interrupt_clearACKGroup(uint16_t ack_group)
     stub_ack_group1_count++;
 }
 
+static bool stub_interrupts_disabled = false;
+
 bool Interrupt_disableGlobal(void)
 {
+    bool previous = stub_interrupts_disabled;
     stub_disable_global_count++;
-    return false;
+    stub_interrupts_disabled = true;
+    return previous;
 }
 
 bool Interrupt_enableGlobal(void)
 {
     stub_enable_global_count++;
+    stub_interrupts_disabled = false;
     return false;
 }
 
 // 光电和当前角度模块不在本测试范围内，用记录桩验证 ISR 调用关系。
 static uint32_t stub_photo_update_count = 0U;
+static uint16_t stub_photo_enter = 0U;
+static uint32_t stub_camera_bottle_count = 0U;
+static uint32_t stub_camera_position_count = 0U;
+static uint32_t stub_camera_tick_count = 0U;
+static uint32_t stub_camera_last_position = 0U;
 static uint32_t stub_angle_update_count = 0U;
 static uint32_t stub_angle_init_count = 0U;
 static int32_t stub_last_angle_delta = 0;
 
-void photoelectric_sensor_update(void)
+uint16_t photoelectric_sensor_update(void)
 {
     stub_photo_update_count++;
+    if (stub_photo_enter != 0U)
+    {
+        stub_photo_enter = 0U;
+        return 1U;
+    }
+    return 0U;
+}
+
+void camera_trigger_on_bottle(uint32_t position)
+{
+    stub_camera_bottle_count++;
+    stub_camera_last_position = position;
+}
+
+void camera_trigger_update_position(uint32_t position)
+{
+    stub_camera_position_count++;
+    stub_camera_last_position = position;
+}
+
+void camera_trigger_tick_1ms(void)
+{
+    stub_camera_tick_count++;
+}
+
+void camera_trigger_reset_pending(void)
+{
 }
 
 void turntable_angle_update_delta(int32_t count_delta)
@@ -235,9 +272,9 @@ int main(void)
     static const uint32_t window_idle[5] = {100U, 100U, 100U, 100U, 100U};
     static const uint32_t window_forward[5] = {120U, 140U, 160U, 180U, 200U};
     static const uint32_t window_reverse[5] = {180U, 160U, 140U, 120U, 100U};
-    static const uint32_t window_fast[5] = {880U, 1660U, 2440U, 3220U, 0U};
-    static const uint32_t window_forward_rollover[5] = {3990U, 3995U, 0U, 5U, 10U};
-    static const uint32_t window_reverse_rollover[5] = {5U, 0U, 3995U, 3990U, 3985U};
+    static const uint32_t window_fast[5] = {880U, 1660U, 2440U, 3220U, 4000U};
+    static const uint32_t window_forward_rollover[5] = {7990U, 7995U, 0U, 5U, 10U};
+    static const uint32_t window_reverse_rollover[5] = {5U, 0U, 7995U, 7990U, 7985U};
 
     uint16_t index;
 
@@ -267,9 +304,9 @@ int main(void)
     assert((TURNTABLE_ENCODER_SAMPLE_FREQUENCY_HZ *
             TURNTABLE_ENCODER_SAMPLE_INTERVAL_TICKS) ==
            TURNTABLE_TIMER_TICK_FREQUENCY_HZ);
-    assert(TURNTABLE_SPEED_COUNTS_PER_REVOLUTION == 4000L);
-    assert(TURNTABLE_SPEED_COUNTS_ROLLOVER == 4000L);
-    assert(TURNTABLE_SPEED_COUNTS_ROLLOVER_HALF == 2000L);
+    assert(TURNTABLE_SPEED_COUNTS_PER_REVOLUTION == 8000L);
+    assert(TURNTABLE_SPEED_COUNTS_ROLLOVER == 8000L);
+    assert(TURNTABLE_SPEED_COUNTS_ROLLOVER_HALF == 4000L);
 
     // 初始化后用当前位置建立基准，第一次采样不会产生虚假位移。
     assert(g_turntable_encoder_position == 100U);
@@ -292,6 +329,8 @@ int main(void)
     assert(g_turntable_encoder_position == 100U);   // 前 9 个 tick 没有采编码器
     assert(stub_angle_update_count == 0U);
     assert(stub_photo_update_count == 9U);          // 光电每 1 ms 都刷
+    assert(stub_camera_tick_count == 9U);
+    assert(stub_camera_position_count == 9U);      // 相机位置判断也用 1 ms 时基
 
     // 第 10 个 tick 才采样。位置放回 100，让这次采样不污染后面的 M 法窗口。
     stub_encoder3_position = 100U;
@@ -301,6 +340,14 @@ int main(void)
     assert(g_turntable_sample_delta == 0);
     assert(stub_angle_update_count == 1U);          // 第 10 个 tick 才采
     assert(stub_photo_update_count == 10U);
+
+    // 新瓶入瓶沿当场锁存 eQEP 位置，不等待下一次 10 ms 测速采样。
+    stub_photo_enter = 1U;
+    stub_encoder3_position = 125U;
+    run_timer_tick();
+    assert(stub_camera_bottle_count == 1U);
+    assert(stub_camera_last_position == 125U);
+    assert(stub_camera_position_count == 11U);
 
     // 上面的分频验证已经消耗了 1 次窗口采样，重新初始化回到干净的窗口状态。
     stub_timer_log_length = 0U;
@@ -327,27 +374,27 @@ int main(void)
     // ---- 反转普通计数 previous = 120，current = 100，delta = -20 ----
     assert(turntable_speed_wrap_delta(100U, 120U) == -20);
 
-    // ---- 正转跨零 previous = 3990，current = 5，delta = +15 ----
-    assert(turntable_speed_wrap_delta(5U, 3990U) == 15);
+    // ---- 正转跨零 previous = 7990，current = 5，delta = +15 ----
+    assert(turntable_speed_wrap_delta(5U, 7990U) == 15);
 
-    // ---- 反转跨零 previous = 5，current = 3990，delta = -15 ----
-    assert(turntable_speed_wrap_delta(3990U, 5U) == -15);
+    // ---- 反转跨零 previous = 5，current = 7990，delta = -15 ----
+    assert(turntable_speed_wrap_delta(7990U, 5U) == -15);
 
     // 边界：正好相差半个计数周期时不改判方向。
     assert(turntable_speed_wrap_delta(100U, 100U) == 0);
-    assert(turntable_speed_wrap_delta(2000U, 0U) == 2000);
-    assert(turntable_speed_wrap_delta(0U, 2000U) == -2000);
-    assert(turntable_speed_wrap_delta(3999U, 0U) == -1);
-    assert(turntable_speed_wrap_delta(0U, 3999U) == 1);
+    assert(turntable_speed_wrap_delta(4000U, 0U) == 4000);
+    assert(turntable_speed_wrap_delta(0U, 4000U) == -4000);
+    assert(turntable_speed_wrap_delta(7999U, 0U) == -1);
+    assert(turntable_speed_wrap_delta(0U, 7999U) == 1);
 
-    // ---- 0.01 rpm 定点换算：rpm_x100 = M × 30 ----
+    // ---- 0.01 rpm 定点换算：rpm_x100 = M × 15 ----
     assert(turntable_speed_rpm_x100_from_count(0) == 0);
-    assert(turntable_speed_rpm_x100_from_count(100) == 3000);
-    assert(turntable_speed_rpm_x100_from_count(-100) == -3000);
-    assert(turntable_speed_rpm_x100_from_count(1) == 30);
-    assert(turntable_speed_rpm_x100_from_count(-1) == -30);
-    assert(turntable_speed_rpm_x100_from_count(34) == 1020);
-    assert(turntable_speed_rpm_x100_from_count(50) == 1500);
+    assert(turntable_speed_rpm_x100_from_count(100) == 1500);
+    assert(turntable_speed_rpm_x100_from_count(-100) == -1500);
+    assert(turntable_speed_rpm_x100_from_count(1) == 15);
+    assert(turntable_speed_rpm_x100_from_count(-1) == -15);
+    assert(turntable_speed_rpm_x100_from_count(34) == 510);
+    assert(turntable_speed_rpm_x100_from_count(50) == 750);
 
     // ---- 5 次 10 ms 采样累加成 M，不能把单次 delta 当成 50 ms 的 M ----
     // 上一个窗口停在 100，这里开始新的 50 ms 窗口。
@@ -373,32 +420,32 @@ int main(void)
     run_encoder_sample(window_forward[4]);
     assert(g_turntable_sample_delta == 20);
     assert(g_turntable_accumulated_count == 0);
-    // M = +100（= 5 × 20）对应 30.00 rpm。
-    assert_window(100, 3000, 30.00f, 2U);
+    // M = +100（= 5 × 20）对应 15.00 rpm。
+    assert_window(100, 1500, 15.00f, 2U);
 
     // ---- 反转整窗口：M = -100，转速应为负 ----
     run_encoder_samples(window_reverse, 5U);
-    assert_window(-100, -3000, -30.00f, 3U);
+    assert_window(-100, -1500, -15.00f, 3U);
 
     // ---- 高速正转整窗口：M = +3900 ----
     run_encoder_samples(window_fast, 5U);
     assert(g_turntable_sample_delta == 780);
-    assert_window(3900, 117000, 1170.00f, 4U);
+    assert_window(3900, 58500, 585.00f, 4U);
 
-    // 为跨零窗口建立3990计数的位置基准。
-    g_turntable_encoder_position = 3900U;
-    g_turntable_previous_position = 3900U;
-    stub_encoder3_position = 3900U;
+    // 为跨零窗口建立 7900 计数的位置基准。
+    g_turntable_encoder_position = 7900U;
+    g_turntable_previous_position = 7900U;
+    stub_encoder3_position = 7900U;
 
-    // ---- 正转跨零整窗口：3999 之后回到 0，delta 仍为小幅正值 ----
+    // ---- 正转跨零整窗口：7999 之后回到 0，delta 仍为小幅正值 ----
     run_encoder_samples(window_forward_rollover, 5U);
     assert(g_turntable_sample_delta == 5);
-    assert_window(110, 3300, 33.00f, 5U);
+    assert_window(110, 1650, 16.50f, 5U);
 
-    // ---- 反转跨零整窗口：0 之前退到 3999，delta 仍为小幅负值 ----
+    // ---- 反转跨零整窗口：0 之前退到 7999，delta 仍为小幅负值 ----
     run_encoder_samples(window_reverse_rollover, 5U);
     assert(g_turntable_sample_delta == -5);
-    assert_window(-25, -750, -7.50f, 6U);
+    assert_window(-25, -375, -3.75f, 6U);
 
     // 6 个窗口 × 5 次采样 × 10 个 tick = 300 次 1 ms 中断。
     assert(g_turntable_timer_interrupt_count == 300U);
@@ -422,10 +469,21 @@ int main(void)
     }
 
     // ---- 临界区读取：复制快照前后各开关一次全局中断 ----
-    assert(turntable_speed_get_rpm_x100() == -750);
+    assert(turntable_speed_get_rpm_x100() == -375);
     assert(stub_disable_global_count != 0U);
     assert(stub_disable_global_count == stub_enable_global_count);
     assert(turntable_speed_get_rpm_x100() == g_turntable_speed_rpm_x100);
+
+    assert(turntable_speed_get_tick_count() == 300U);
+    assert(!stub_interrupts_disabled);
+    {
+        uint32_t enables = stub_enable_global_count;
+        stub_interrupts_disabled = true;
+        assert(turntable_speed_get_tick_count() == 300U);
+        assert(stub_interrupts_disabled);
+        assert(stub_enable_global_count == enables);
+        stub_interrupts_disabled = false;
+    }
 
     // ---- TCP 收到 re 后，硬件位置、测速基准和软件角度一起清零 ----
     turntable_speed_reset_encoder3();
@@ -439,6 +497,7 @@ int main(void)
     assert(g_turntable_speed_rpm_x100 == 0);
     assert(g_turntable_speed_rpm == 0.0f);
     assert(stub_angle_init_count == 1U);
+    assert(turntable_speed_get_tick_count() == 300U);
 
     puts("Turntable speed tests passed.");
     return 0;

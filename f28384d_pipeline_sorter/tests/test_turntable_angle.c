@@ -28,23 +28,23 @@ int main(void)
     assert(g_turntable_angle_accumulated_counts == 0);
     assert(turntable_angle_get_degrees_x100() == 0);
 
-    // 1000 / 4000 圈正好是 90.00 度。
-    turntable_angle_update_delta(1000);
-    assert(g_turntable_angle_accumulated_counts == 1000);
+    // 2000 / 8000 圈正好是 90.00 度。
+    turntable_angle_update_delta(2000);
+    assert(g_turntable_angle_accumulated_counts == 2000);
     assert(turntable_angle_get_degrees_x100() == 9000);
 
-    // 一圈最后一个计数对应 359.91 度，再前进一个计数回到 0.00 度。
-    turntable_angle_update_delta(2999);
-    assert(g_turntable_angle_accumulated_counts == 3999);
-    assert(turntable_angle_get_degrees_x100() == 35991);
+    // 一圈最后一个计数对应 359.95 度，再前进一个计数回到 0.00 度。
+    turntable_angle_update_delta(5999);
+    assert(g_turntable_angle_accumulated_counts == 7999);
+    assert(turntable_angle_get_degrees_x100() == 35995);
     turntable_angle_update_delta(1);
     assert(g_turntable_angle_accumulated_counts == 0);
     assert(turntable_angle_get_degrees_x100() == 0);
 
-    // 从零位反转一个计数，应当回绕到本圈的 359.91 度。
+    // 从零位反转一个计数，应当回绕到本圈的 359.95 度。
     turntable_angle_update_delta(-1);
-    assert(g_turntable_angle_accumulated_counts == 3999);
-    assert(turntable_angle_get_degrees_x100() == 35991);
+    assert(g_turntable_angle_accumulated_counts == 7999);
+    assert(turntable_angle_get_degrees_x100() == 35995);
 
     // 收到复位命令后，软件角度计数和角度都回到零。
     turntable_angle_init();

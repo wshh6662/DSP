@@ -40,8 +40,8 @@ if ($main_source -notmatch 'turntable_angle_get_degrees_x100\(\);') {
     throw 'The main loop must take one current-angle snapshot per iteration.'
 }
 
-if ($main_source -notmatch 'photoelectric_tcp_server_poll\(\s*g_photoelectric_detected\s*,\s*encoder_speed_snapshot\s*,\s*angle_snapshot_x100\s*\)') {
-    throw 'The main loop must publish encoder speed, object state and angle over TCP.'
+if ($main_source -notmatch 'photoelectric_tcp_server_poll\(\s*encoder_speed_snapshot\s*,\s*angle_snapshot_x100\s*,\s*detected_snapshot\s*\)') {
+    throw 'The main loop must publish only encoder speed and angle over TCP.'
 }
 
 if ($main_source -notmatch 'turntable_speed_reset_encoder3\(\);') {
@@ -81,7 +81,7 @@ if (-not $turntable_isr.Success) {
 
 $isr_body = $turntable_isr.Groups['body'].Value
 
-if (-not $isr_body.Contains('photoelectric_sensor_update();')) {
+if (-not $isr_body.Contains('photoelectric_sensor_update()')) {
     throw 'The Timer0 ISR must sample the photoelectric input.'
 }
 
@@ -93,8 +93,9 @@ if (-not $isr_body.Contains('TURNTABLE_ENCODER_SAMPLE_INTERVAL_TICKS')) {
     throw 'The Timer0 ISR must divide the 1 ms tick down to the 10 ms encoder sample.'
 }
 
-if (-not $isr_body.Contains('turntable_speed_sample_position(EQEP_getPosition(myEQEP3_BASE));')) {
-    throw 'The divided encoder sample must read eQEP3.'
+if (-not $isr_body.Contains('EQEP_getPosition(myEQEP3_BASE)') -or
+    -not $isr_body.Contains('turntable_speed_sample_position(position);')) {
+    throw 'The Timer0 ISR must read eQEP3 and pass the position to the divided speed sample.'
 }
 
 foreach ($forbidden in @('send(', 'recv(', 'photoelectric_tcp_build_payload')) {

@@ -92,6 +92,7 @@ static uint16_t Modbus_ReadU16(const modbus_octet_t *bytes)
     return (uint16_t)((high << 8U) | low);
 }
 
+// Modbus 的地址、数量和寄存器值均按高字节在前写入报文。
 static void Modbus_WriteU16(modbus_octet_t *bytes, uint16_t value)
 {
     uint32_t wide = (uint32_t)value;
@@ -193,6 +194,7 @@ static modbus_octet_t Modbus_IsReservedHoldingAddress(uint16_t address)
     return 0U;
 }
 
+// 每个存储单元保存 8 个线圈，低地址对应低位。
 static modbus_octet_t Modbus_GetCoil(uint16_t address)
 {
     modbus_octet_t packed = modbus_coils[(uint16_t)(address >> 3U)];
@@ -200,6 +202,7 @@ static modbus_octet_t Modbus_GetCoil(uint16_t address)
     return (modbus_octet_t)((packed >> (address & 7U)) & 0x01U);
 }
 
+// 仅修改目标线圈位，保留同一存储单元内的其他线圈。
 static void Modbus_SetCoil(uint16_t address, modbus_octet_t value)
 {
     uint16_t byte_index = (uint16_t)(address >> 3U);
@@ -216,6 +219,7 @@ static void Modbus_SetCoil(uint16_t address, modbus_octet_t value)
     }
 }
 
+// 应用层消费一次性命令后调用；越界地址不写入存储区。
 void ModbusTcp_ClearCoil(uint16_t address)
 {
     if (address < MODBUS_COIL_COUNT)

@@ -41,11 +41,15 @@ try {
         throw 'Generated myEQEP3_init() was not found.'
     }
 
-    $expected = 'EQEP_setPositionCounterConfig(myEQEP3_BASE,EQEP_POSITION_RESET_MAX_POS,3999U);'
+    $expected = 'EQEP_setPositionCounterConfig(myEQEP3_BASE,EQEP_POSITION_RESET_MAX_POS,7999U);'
     if (-not $encoder3_init.Groups['body'].Value.Contains($expected)) {
         throw "Encoder 3 generated position configuration is incorrect. Expected: $expected"
     }
 
+    if ($encoder3_init.Groups['body'].Value -notmatch 'EQEP_CONFIG_SWAP' -or
+        $encoder3_init.Groups['body'].Value -match 'EQEP_CONFIG_NO_SWAP') {
+        throw 'Encoder 3 must swap A/B in hardware so production movement counts up.'
+    }
     Write-Host 'Encoder 3 SysConfig generation test passed.'
 }
 finally {

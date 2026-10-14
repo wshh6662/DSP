@@ -4,12 +4,14 @@
 #include "driverlib.h"
 #include "modbus_rtu_server.h"
 
+// 请求跨轮询累积，响应在完整帧处理后一次发送；长度以协议字节计。
 static modbus_octet_t rs485_request[MODBUS_RTU_MAX_ADU_LENGTH];
 static modbus_octet_t rs485_response[MODBUS_RTU_MAX_ADU_LENGTH];
 static uint16_t rs485_request_length = 0U;
 static uint16_t rs485_idle_polls = 0U;
-static uint16_t rs485_count_reset_requested = 0U;
+static uint16_t rs485_count_reset_requested = 0U; // 交给主循环消费的计数清零请求。
 
+// 只识别成功的 FC05/FC0F 写 ON 命令，区分单线圈值与多线圈位打包格式。
 static uint16_t rs485_request_sets_coil(const modbus_tcp_result_t *result,
                                        uint16_t target_address)
 {
@@ -41,18 +43,21 @@ static uint16_t rs485_request_sets_coil(const modbus_tcp_result_t *result,
     return 0U;
 }
 
+// 关闭发送驱动并进入接收模式，等待显示器作为主站发出请求。
 static void rs485_set_receive_mode(void)
 {
     GPIO_writePin(RS485_MODBUS_DIRECTION_PIN,
                   RS485_MODBUS_RX_ENABLE_LEVEL);
 }
 
+// 回复前使能发送驱动；方向电平由头文件中的板卡配置决定。
 static void rs485_set_transmit_mode(void)
 {
     GPIO_writePin(RS485_MODBUS_DIRECTION_PIN,
                   RS485_MODBUS_TX_ENABLE_LEVEL);
 }
 
+// 通过 SCIB FIFO 顺序发送 RTU 响应，帧尾发完后释放总线。
 static void rs485_send_response(uint16_t response_length)
 {
     uint16_t index;
@@ -76,6 +81,7 @@ static void rs485_send_response(uint16_t response_length)
     rs485_set_receive_mode();
 }
 
+// 校验完整请求、更新寄存器映射，并处理 HMI 的一次性命令线圈。
 static void rs485_process_request(uint32_t detection_count)
 {
     modbus_tcp_result_t result;
@@ -90,12 +96,14 @@ static void rs485_process_request(uint32_t detection_count)
         MODBUS_RTU_MAX_ADU_LENGTH,
         &result);
 
+    // 消费清零命令后立即清回 OFF，使显示器下一次按键可以重新触发。
     if (rs485_request_sets_coil(&result,
                                RS485_MODBUS_COUNT_RESET_COIL_ADDRESS) != 0U)
     {
         rs485_count_reset_requested = 1U;
         ModbusTcp_ClearCoil(RS485_MODBUS_COUNT_RESET_COIL_ADDRESS);
     }
+    // 以下两项当前只恢复命令线圈；这里未执行实际队列清空或报警清除业务。
     if (rs485_request_sets_coil(&result,
                                RS485_MODBUS_QUEUE_RESET_COIL_ADDRESS) != 0U)
     {
@@ -115,6 +123,7 @@ static void rs485_process_request(uint32_t detection_count)
     }
 }
 
+// 配置上层板 SCIB 引脚、RS485 方向和串口参数，并清除接收状态。
 void rs485_modbus_port_init(void)
 {
     // 将新版板卡标注的 SCI2 引脚连接到 F28384D 的 SCIB 外设。
@@ -148,6 +157,7 @@ void rs485_modbus_port_init(void)
     rs485_count_reset_requested = 0U;
 }
 
+// 读取后清除软件请求标志，同一帧的清零命令仅由主循环执行一次。
 uint16_t rs485_modbus_port_take_count_reset_request(void)
 {
     uint16_t requested = rs485_count_reset_requested;
@@ -156,6 +166,7 @@ uint16_t rs485_modbus_port_take_count_reset_request(void)
     return requested;
 }
 
+// 每轮先排空接收 FIFO，再用连续空闲轮数判断 RTU 帧结束。
 void rs485_modbus_port_poll(uint32_t detection_count)
 {
     uint16_t received_any = 0U;
@@ -174,6 +185,7 @@ void rs485_modbus_port_poll(uint32_t detection_count)
         return;
     }
 
+    // FIFO 溢出说明已有字节丢失，清除残帧后等待新的请求。
     if (SCI_getOverflowStatus(SCIB_BASE))
     {
         SCI_clearOverflowStatus(SCIB_BASE);
@@ -195,6 +207,7 @@ void rs485_modbus_port_poll(uint32_t detection_count)
         }
         else
         {
+            // 软件缓冲区已满，读走当前字节并清除已累积的帧长度。
             (void)SCI_readCharNonBlocking(SCIB_BASE);
             rs485_request_length = 0U;
         }
@@ -204,6 +217,7 @@ void rs485_modbus_port_poll(uint32_t detection_count)
     {
         rs485_idle_polls = 0U;
     }
+    // 已有数据且本轮没有新字节：达到配置的间隔后处理整帧。
     else if (rs485_request_length != 0U)
     {
         rs485_idle_polls++;
